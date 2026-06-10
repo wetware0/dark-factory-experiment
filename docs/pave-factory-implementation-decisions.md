@@ -53,7 +53,10 @@ This log records the assumptions, decisions, and operational constraints used wh
 - Factory portal state should use SQL Server by default because SQL Server is the standard WTG operational database.
 - Runtime selector: `FACTORY_STORAGE_PROVIDER=sqlserver`.
 - Required SQL Server setting: `FACTORY_SQLSERVER_CONNECTION_STRING`.
+- Peter's local SQL Server is reachable on `RYZEN2` with Windows integrated authentication through `ODBC Driver 18 for SQL Server`. The recommended factory connection string should include an explicit factory database, for example `Database=DarkFactory`.
 - The SQL Server repository creates factory tables idempotently on first use and stores JSON-shaped fields as `NVARCHAR(MAX)` payloads.
+- SQLite is supported as a local smoke-test provider through `FACTORY_STORAGE_PROVIDER=sqlite` and `FACTORY_SQLITE_PATH`.
+- SQLite stores JSON-backed factory entities in a single local database file. It is not the multi-instance coordination store for a real dark-factory pool.
 - The inherited DynaChat chat/RAG application was already Postgres/pgvector-backed before the PAVE factory work. That storage remains separate in this PR because replacing pgvector and Postgres full-text retrieval with SQL Server equivalents is a broader migration.
 - A Postgres factory repository and migration remain available as a compatibility path, but they are not the preferred WTG deployment target.
 

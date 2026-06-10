@@ -72,6 +72,22 @@ FACTORY_STORAGE_PROVIDER=sqlserver
 FACTORY_SQLSERVER_CONNECTION_STRING="Driver={ODBC Driver 18 for SQL Server};Server=YOURSERVER;Database=DarkFactory;Trusted_Connection=yes;TrustServerCertificate=yes;"
 ```
 
+Peter's local SQL Server smoke connection succeeded against `RYZEN2` / `master` using Windows integrated authentication and `ODBC Driver 18 for SQL Server`. The `DarkFactory` database did not exist at the time of the check, so create/select that database before using the SQL Server provider locally:
+
+```powershell
+FACTORY_STORAGE_PROVIDER=sqlserver
+FACTORY_SQLSERVER_CONNECTION_STRING="Driver={ODBC Driver 18 for SQL Server};Server=RYZEN2;Database=DarkFactory;Trusted_Connection=yes;Encrypt=yes;TrustServerCertificate=yes;Application Name=Dark Factory;"
+```
+
+SQLite is available for local factory smoke tests:
+
+```powershell
+FACTORY_STORAGE_PROVIDER=sqlite
+FACTORY_SQLITE_PATH=.factory/factory.sqlite3
+```
+
+SQLite is deliberately a test provider, not the shared store for a multi-instance factory pool.
+
 The inherited DynaChat chat/RAG scaffold still requires its existing `DATABASE_URL` Postgres/pgvector database. Migrating that legacy side to SQL Server is deliberately separate because retrieval currently depends on Postgres full-text search and pgvector.
 
 ## Inputs Reviewed
