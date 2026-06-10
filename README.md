@@ -1,190 +1,182 @@
-# The Dark Factory Experiment (RAG YouTube Chat App)
+# PAVE Dark Factory Worker
 
-**A public Dark Factory experiment.** This repository is a working web application that is built, reviewed, and merged almost entirely by AI coding agents. Humans only do two things: file issues and promote releases. Everything in between - triage, implementation, code review, testing, merging - is handled by Archon workflows running on a cron.
+This repository is being reframed as a **WiseTech Global PAVE-driven dark factory worker** for CargoWise development tasks.
 
-The application itself is a dark-mode AI chat app that lets you have grounded conversations about a creator's YouTube videos, with cited answers pulled from transcript passages. But the *real* point of this repo is the factory that builds it.
+PAVE is the single source of truth. The worker discovers startable PAVE tasks, claims them safely through ediProd, executes an Archon workflow against the appropriate CargoWise repository set, and reports the resulting agentic artifacts back to the work item or incident. The web surface in this repo is now the **factory control portal**, not the product being built.
 
-![Main chat interface](app/screenshots/screenshot-main.png)
-
----
-
-## The Dark Factory
-
-The term "Dark Factory" comes from Dan Shapiro (Glowforge), inspired by FANUC's 1980s lights-out robotics plants where robots built robots 24/7 with no humans on the floor. Applied to software: **specs go in, software comes out.**
-
-This repo is a live attempt at that pattern, and it uses GitHub itself as the shared state machine.
-
-### The three layers
-
-There's a stack of three distinct things doing the work, and it's worth pulling them apart:
-
-1. **The harness: [Archon](https://github.com/coleam00/archon).** The workflow engine, and the thing that makes the whole experiment possible. Archon lets you stitch coding agent sessions together with deterministic steps (running scripts, calling `gh`, parsing output, branching on results) into a single end-to-end workflow you actually trust. The Dark Factory's logic, "triage these issues, then implement this one, then validate the PR, then merge it," is built in Archon as a handful of workflows under `.archon/workflows/`. Without something like Archon, you're either hand-prompting agents one step at a time or writing a giant brittle script around them. Archon is what turns "AI can sometimes do this" into "the factory does this every few hours, on its own."
-2. **The coding agent: Claude Code.** Inside each AI node, Archon spawns Claude Code as the agent. Claude Code is what actually holds the tools (file editing, bash, `gh`, web fetch), runs the loop, and executes the work the prompt asks for.
-3. **The model: MiniMax M2.7.** Claude Code is routed to MiniMax M2.7 instead of Anthropic's models. Claude Code is the wrapper around the model; MiniMax is the brain doing the reasoning and the writing.
-
-The reason for swapping the model out is purely economic. At the throughput a real Dark Factory needs (multiple multi-hour workflow runs per day, each burning a lot of tokens on planning, implementation, and review), running on an Anthropic subscription would hit rate limits quickly. MiniMax M2.7 is cheap and fast enough to let the experiment actually run continuously without throttling.
-
-### How a change actually ships
-
-```
-        GitHub Issues (filed by humans or the regression testing workflow)
-                       │
-                       ▼
-            ┌──────────────────────┐
-            │  Orchestrator (cron) │   thin Claude Agent SDK loop
-            │  every 4-6 hours     │   reads GitHub state, dispatches
-            └──────────┬───────────┘   one Archon workflow at a time
-                       │
-       ┌───────────────┼────────────────┐
-       ▼               ▼                ▼
-  dark-factory     fix-github-     dark-factory
-  -triage          issue           -validate-pr
-  (classify        (10-phase       (independent
-   open issues,     implement +     holdout review
-   accept/reject)   draft PR)       + auto-merge)
-                       │
-                       ▼
-                ┌─────────────┐
-                │    main     │  AI-managed branch
-                │ auto-deploys│  → staging / preview
-                └──────┬──────┘
-                       │  human promotes periodically
-                       ▼
-                ┌─────────────┐
-                │  release/*  │  human-cut stable
-                │   deploys   │  → production
-                └─────────────┘
-```
-
-### Labels are the state machine
-
-The orchestrator does not hold state itself. It reads GitHub labels and decides what to do next:
-
-**Issues:** `factory:triaging` → `factory:accepted` → `factory:in-progress` → (PR opened) or `factory:rejected` (closed with reason).
-
-**PRs:** `factory:implementing` → `factory:needs-review` → `factory:approved` (auto-merged) or `factory:needs-fix` → back to review (max 2 fix attempts) → `factory:needs-human` (escalated).
-
-**Priority:** Triage tags every accepted issue `priority:critical|high|medium|low` so the orchestrator picks the highest-impact work first.
-
-### The non-negotiable rules
-
-These come from research on every prior Dark Factory attempt (StrongDM, Spotify Honk, Steve Yegge's Gas Town) and the failure modes they hit:
-
-1. **The validator never reads the implementation plan.** It checks the *outcome* against the *issue*, not the approach. This is StrongDM's "holdout" pattern - it's what stops an agent from gaming its own acceptance criteria.
-2. **Triage has only two verdicts: accept or reject.** No "needs human" inbox. If a human disagrees with a rejection, they reopen with more context and the next triage cycle picks it up fresh.
-3. **Governance files (`MISSION.md`, `FACTORY_RULES.md`) can never be modified by the factory.** The security review hard-fails any PR that touches them.
-4. **One workflow at a time.** The orchestrator checks `bun run cli workflow status` before dispatching. The 4-hour cadence caps throughput structurally.
-5. **Flood protection.** Non-owner accounts are capped at 3 issues per UTC day; excess get `factory:rate-limited` and re-evaluated after midnight.
-6. **Per-node budget caps.** Every workflow node has a `maxBudgetUsd`. Triage batches max 10 issues per run and truncates each body to ~2KB.
-
-### Workflows in this repo
-
-Defined in [`.archon/workflows/`](.archon/workflows):
-
-| Workflow | Job |
-|---|---|
-| `dark-factory-triage.yaml` | Batch-classify untriaged issues against `MISSION.md` + `FACTORY_RULES.md`. Outputs structured JSON, applies labels and comments deterministically via `gh`. |
-| `dark-factory-fix-github-issue.yaml` | The workhorse. A Dark-Factory-owned fork of Archon's bundled `fix-github-issue`, adapted for this repo's Python + Bun stack: classify → research → plan → implement → Python/TS validation (ruff/mypy/pytest + tsc/biome/vitest) → draft PR → smart review → self-fix → simplify. Every AI node references a `.md` command file (no inline prompts). |
-| `dark-factory-validate-pr.yaml` | Independent gate. Static checks + tests, then parallel AI review (behavioral validation, code review, error handling, security check), synthesized verdict, auto-merge or fix-and-retry. The fix step is folded in as a fresh-context node so the second-pass validator stays a true holdout. |
+The original DynaChat chat/RAG application remains in the tree as inherited scaffold and an implementation harness. It is not the mission of this repository anymore.
 
 ---
 
-## The Application
+## What This Worker Does
 
-What the factory is actually building.
+The target operating model is:
 
-### Architecture
+1. A small scout worker polls a configured PAVE board with low token cost.
+2. The scout only chooses a task when the staff code has no other playing task.
+3. The scout creates a compact task handoff for the intelligent agent.
+4. The agent claims and starts exactly one PAVE task through ediProd.
+5. Archon executes a deterministic DAG for research, repo-set planning, implementation, validation, critic review, evidence reporting, close/suspend handling, and self-learning.
+6. All instances report telemetry, logs, MCP readiness, PR sets, artifacts, critic output, and evidence status to the central portal.
+7. The final evidence report is written to the job eDoc and contains the same full log shown in the dashboard.
 
-```
-┌─────────────────┐       /api proxy        ┌─────────────────────────┐
-│    Frontend     │ ─────────────────────── │        Backend          │
-│  React + Vite   │    localhost:5173 →     │       FastAPI           │
-│  TypeScript     │        :8000            │                         │
-│  Tailwind CSS   │                         │  Routes ── RAG Pipeline │
-└─────────────────┘                         │    │        │           │
-                                            │    │     Chunker        │
-                                            │    │     (Docling)      │
-                                            │    │        │           │
-                                            │    DB    Embeddings     │
-                                            │(Postgres) (OpenRouter)  │
-                                            │            │            │
-                                            │         Retriever       │
-                                            │  (RRF hybrid: tsvector   │
-                                            │   + pgvector cosine)     │
-                                            │            │            │
-                                            │           LLM           │
-                                            │    (Claude via          │
-                                            │     OpenRouter)         │
-                                            └─────────────────────────┘
-```
-
-- **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS (Bun)
-- **Backend:** Python FastAPI, single process handling API + RAG + LLM
-- **Database:** Postgres via asyncpg (with pgvector for hybrid retrieval)
-- **LLM:** Claude Sonnet via OpenRouter with SSE streaming
-- **Embeddings:** `text-embedding-3-small` via OpenRouter
-- **Chunking:** Docling HybridChunker
-- **Retrieval:** Reciprocal Rank Fusion (RRF) combining Postgres tsvector full-text search with pgvector cosine similarity, top-5 chunks
-
-### How it works
-
-1. **Ingest** - Video transcripts are chunked with Docling's HybridChunker and embedded via OpenRouter.
-2. **Sync** - `POST /api/channels/sync` automatically enumerates and ingests new videos from a YouTube channel via Supadata.
-3. **Retrieve** - User queries are embedded and matched against chunks using cosine similarity.
-4. **Generate** - Top-5 chunks are passed as context to Claude, which streams a cited response back via SSE.
+The worker is designed for CargoWise work, including changes that span the large `CargoWise` repository and one or more sibling `CargoWise.*` module repositories. A single PAVE work item can therefore result in multiple branches, multiple pull requests, and per-repository build/test evidence.
 
 ---
 
-## Quick Start
+## Source Of Truth
 
-### Prerequisites
+PAVE owns:
 
-- Python 3.11+
-- [Bun](https://bun.sh)
-- An [OpenRouter](https://openrouter.ai) API key
+- work discovery and prioritisation;
+- task lifecycle state: claim, start, suspend, resume, complete, cancel;
+- work item / incident context and final updates;
+- staff-code play constraints;
+- the audit trail for generated artifacts.
 
-### Setup
+The portal mirrors operational state. It must not become a second work queue. GitHub remains the source control and pull-request surface only.
 
-1. Clone the repo and create a `.env` file in the project root:
+Required MCP services:
 
+- `ediprod`: PAVE lifecycle, work item / incident updates, task notes, eDoc evidence.
+- `wtgkb`: current WTG and CargoWise knowledge for the task being executed.
+- `sbkb`: durable Second Brain learning capture during dedicated self-learning tasks.
+
+If any required MCP is stale, unauthenticated, unauthorized, or missing, the affected scout or executor pauses. The dashboard must show the stalled state and expose the reauthentication/update action rather than letting the worker continue with partial trust.
+
+---
+
+## Local Services
+
+Use the service controller to run the backend, frontend, and scout worker:
+
+```powershell
+.\scripts\factory-services.ps1 start
+.\scripts\factory-services.ps1 status
+.\scripts\factory-services.ps1 stop
+.\scripts\factory-services.ps1 restart
 ```
-OPENROUTER_API_KEY=your-key-here
+
+The dashboard is served by the Vite app at:
+
+```text
+http://127.0.0.1:5173/factory
 ```
 
-2. Start everything:
+The script creates a worker token at `.factory/factory-worker-token.txt`, stores service PIDs in `.factory/pids`, and writes logs in `.factory/logs`.
 
-```bash
-# Unix/Mac
-cd app && ./start.sh
+Default local operating inputs:
 
-# Windows
-cd app && start.bat
+- PAVE board: `Peter's Board`
+- staff code: `PWS`
+
+Override these with script parameters or environment variables when running another worker pool.
+
+---
+
+## Database
+
+Factory portal state defaults to SQL Server because that is the WTG operational database standard:
+
+```powershell
+$env:FACTORY_STORAGE_PROVIDER = "sqlserver"
+$env:FACTORY_SQLSERVER_CONNECTION_STRING = "Driver={ODBC Driver 18 for SQL Server};Server=YOURSERVER;Database=DarkFactory;Trusted_Connection=yes;TrustServerCertificate=yes;"
 ```
 
-This sets up the Python venv, installs dependencies, seeds the database with 10 sample videos, and starts both servers.
+The SQL Server repository creates factory tables idempotently and stores JSON-shaped fields as `NVARCHAR(MAX)` payloads.
 
-3. Open [http://localhost:5173](http://localhost:5173)
+The inherited chat/RAG scaffold still requires its original `DATABASE_URL` Postgres/pgvector database. Migrating that legacy retrieval code to SQL Server is a separate task because it depends on Postgres full-text search and pgvector.
 
-### Manual start
+---
 
-```bash
-# Backend
+## Architecture
+
+```mermaid
+flowchart LR
+    PAVE["PAVE / ediProd<br/>single source of truth"] --> Scout["Scout worker<br/>cheap polling and play guard"]
+    Scout --> Agent["Intelligent agent<br/>one authorized task"]
+    Agent --> Archon["Archon DAG"]
+    Archon --> Repos["CargoWise repository set<br/>CargoWise + CargoWise.*"]
+    Archon --> Portal["Factory portal<br/>logs, MCP state, artifacts"]
+    Archon --> PAVE
+    Portal --> Operator["Human operator<br/>stalls, reauth, tooling updates"]
+    Archon --> SBKB["Second Brain<br/>approved learnings"]
+    Archon --> WTGKB["WTG knowledge<br/>task context"]
+```
+
+Important design constraints:
+
+- The scout is cheap and conservative. It polls PAVE, checks the staff-code play guard, and passes only compact task context to the expensive agent.
+- Claim safety comes from PAVE lifecycle operations, not portal-side locks.
+- A task must not start if starting it would suspend another playing task for the staff code.
+- The critic is a normal Archon DAG node.
+- Self-learning is a dedicated PAVE task at the end of the work item or incident lifecycle.
+- Skills/plugins are versioned operational dependencies. The portal tracks installed versions, latest known versions, update status, and update jobs.
+
+---
+
+## Key Paths
+
+| Path | Purpose |
+| --- | --- |
+| `app/backend/factory/worker.py` | Scout worker entry point. |
+| `app/backend/routes/factory.py` | Factory portal API. |
+| `app/backend/db/factory_store.py` | Factory storage provider selector. |
+| `app/backend/db/factory_sqlserver_repository.py` | SQL Server factory storage. |
+| `app/frontend/src/pages/FactoryDashboard.tsx` | Central factory dashboard. |
+| `.archon/workflows/pave-dark-factory-execute-task.yaml` | PAVE-native execution workflow. |
+| `.archon/commands/dark-factory-pave-*.md` | Archon command contracts for PAVE execution. |
+| `docs/dark-factory-pave-single-source-report.md` | Deep implementation handoff report. |
+| `docs/pave-factory-implementation-decisions.md` | Assumptions and decisions log. |
+| `scripts/factory-services.ps1` | Start/stop/status controller. |
+
+---
+
+## Legacy App Harness
+
+The inherited FastAPI/React code still includes a RAG chat application. It exists because the upstream dark factory experiment shipped as a web app, and the current branch reuses that authenticated frontend/backend shell for the factory portal.
+
+Legacy chat routes remain available for now:
+
+- `/chat`
+- `/c/:conversationId`
+- `/admin`
+
+The default authenticated route is `/factory`.
+
+Do not treat legacy DynaChat requirements as the mission for new work. New work should serve the PAVE/CargoWise worker unless a PAVE task explicitly targets legacy scaffold cleanup.
+
+---
+
+## Implementation Status
+
+Implemented in this branch:
+
+- PAVE factory portal backend API.
+- SQL Server factory storage path, with Postgres compatibility retained.
+- Scout worker skeleton with fail-closed MCP readiness behavior.
+- Dashboard views for runs, stalled MCPs, tooling currency, artifacts, critic reports, evidence logs, and learning assessments.
+- PAVE-native Archon workflow and command files.
+- Local service controller for start, stop, restart, and status.
+
+Known live-tool constraint:
+
+- `ediprod`, `wtgkb`, and `sbkb` are configured in Codex, but the callable ediProd mutation namespace was not exposed to this implementation thread and the local `edi` CLI fallback was not installed.
+- Until a concrete ediProd/PAVE lifecycle adapter is callable at runtime, the scout must remain stalled before polling, claiming, starting, suspending, completing, assigning, or uploading eDoc evidence.
+
+---
+
+## Validation
+
+Focused local validation commands:
+
+```powershell
 cd app
-python -m venv backend/.venv
-source backend/.venv/bin/activate  # or backend\.venv\Scripts\activate on Windows
-pip install -r backend/requirements.txt
-uvicorn backend.main:app --reload --port 8000
+uv --project backend run python -m compileall -q backend/main.py backend/config.py backend/factory backend/db/factory_store.py backend/db/factory_sqlserver_repository.py backend/routes/factory.py
 
-# Frontend (new terminal)
-cd app/frontend
-bun install
-bun run dev
+cd frontend
+bun run type-check
+bunx biome check src/pages/FactoryDashboard.tsx src/components/BrandingHeader.tsx src/App.tsx src/lib/api.ts
 ```
 
----
-
-## Contributing
-
-You contribute to this repo the same way the factory does: **file an issue.** Don't open a PR - the factory will. If your issue is well-scoped and in line with `MISSION.md`, the next triage cycle will accept it, and a workflow run will open the implementing PR. If it gets rejected, read the comment, sharpen the issue, and reopen.
-
-That's the whole point of the experiment.
+The full inherited chat/RAG test suite still belongs to the legacy scaffold. Factory changes should prefer targeted backend, frontend, service-control, and Archon workflow validation unless the PAVE task touches chat/RAG behavior directly.

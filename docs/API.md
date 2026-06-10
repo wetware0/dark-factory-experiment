@@ -1,6 +1,6 @@
-# DynaChat API
+# Legacy Chat API
 
-DynaChat is a RAG-powered chat interface for querying YouTube channel content with streaming
+The inherited DynaChat scaffold is a RAG-powered chat interface for querying YouTube channel content with streaming
 answers and per-chunk citations that deep-link to the exact timestamp in the source video.
 
 **Base URL:** `http://localhost:8000` (development)

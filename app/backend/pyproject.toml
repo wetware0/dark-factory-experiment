@@ -1,4 +1,4 @@
-# Backend project definition for DynaChat.
+# Backend project definition for the PAVE Dark Factory worker.
 #
 # Managed with `uv` (not pip, not poetry). `pyproject.toml` is the dependency
 # source of truth; `uv.lock` (committed) pins exact versions.
@@ -14,9 +14,9 @@
 # inside the worktree before touching any code.
 
 [project]
-name = "dynachat-backend"
+name = "pave-dark-factory-backend"
 version = "0.1.0"
-description = "DynaChat FastAPI backend — RAG over YouTube transcripts"
+description = "PAVE Dark Factory backend for CargoWise agentic worker orchestration"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi",
@@ -36,6 +36,7 @@ dependencies = [
     "pyjwt",
     "email-validator",
     "supadata",
+    "pyodbc",
 ]
 
 [project.optional-dependencies]

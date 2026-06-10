@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
     await close_pg_pool()
 
 
-app = FastAPI(title="RAG YouTube Chat API", lifespan=lifespan)
+app = FastAPI(title="PAVE Dark Factory API", lifespan=lifespan)
 
 # Allow the Vite dev server to reach the API during development
 app.add_middleware(
@@ -103,7 +103,15 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routes (imported here to keep main.py clean)
 # ---------------------------------------------------------------------------
-from backend.routes import admin, auth, channels, conversations, ingest, messages  # noqa: E402
+from backend.routes import (  # noqa: E402
+    admin,
+    auth,
+    channels,
+    conversations,
+    factory,
+    ingest,
+    messages,
+)
 
 # Auth routes are public (signup/login don't require a session; /me and /logout
 # rely on their own dependency/cookie behaviour).
@@ -125,6 +133,7 @@ _admin_required = [Depends(get_current_admin)]
 app.include_router(ingest.router, prefix="/api", dependencies=_admin_required)
 app.include_router(channels.router, prefix="/api", dependencies=_admin_required)
 app.include_router(admin.router, prefix="/api", dependencies=_admin_required)
+app.include_router(factory.router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +158,7 @@ async def health():
 @app.get("/api/version")
 async def version() -> dict[str, str]:
     try:
-        return {"version": get_version("dynachat-backend")}
+        return {"version": get_version("pave-dark-factory-backend")}
     except PackageNotFoundError:
         raise HTTPException(status_code=503, detail="Package metadata unavailable") from None
 

@@ -1,0 +1,78 @@
+name: pave-dark-factory-execute-task
+description: |
+  Execute one PAVE task with PAVE as the single source of truth.
+
+  The scout worker selects this workflow only after confirming the staff code
+  has no other playing task. The workflow must claim/start exactly one PAVE
+  task, use wtgkb and sbkb for task knowledge, support multiple CargoWise
+  repositories, run critic as a DAG node, upload the full dashboard/evidence
+  report to eDoc, and either close the PAVE task or suspend and assign it back
+  to the configured staff code when close is unavailable.
+
+provider: claude
+model: sonnet
+
+nodes:
+  - id: load-pave-context
+    command: dark-factory-pave-context
+    context: fresh
+
+  - id: mcp-readiness-gate
+    bash: |
+      set -euo pipefail
+      echo "Required MCPs: ediprod, wtgkb, sbkb"
+      echo "This node is a hard gate. The runtime pauses if any required MCP is stale, unavailable, or unauthenticated."
+    depends_on: [load-pave-context]
+    timeout: 10000
+
+  - id: claim-and-start
+    command: dark-factory-pave-claim-safely
+    depends_on: [mcp-readiness-gate]
+    context: fresh
+
+  - id: task-knowledge
+    command: dark-factory-pave-research
+    depends_on: [claim-and-start]
+    context: fresh
+
+  - id: repo-set-plan
+    command: dark-factory-pave-repo-set-plan
+    depends_on: [task-knowledge]
+    context: fresh
+
+  - id: implement
+    command: dark-factory-pave-implement
+    depends_on: [repo-set-plan]
+    context: fresh
+
+  - id: validate
+    command: dark-factory-validate
+    depends_on: [implement]
+    context: fresh
+
+  - id: critic
+    command: dark-factory-pave-critic
+    depends_on: [validate]
+    context: fresh
+
+  - id: self-fix
+    command: archon-self-fix-all
+    depends_on: [critic]
+    context: fresh
+
+  - id: evidence-report
+    command: dark-factory-pave-evidence
+    depends_on: [self-fix]
+    context: fresh
+
+  - id: close-or-suspend
+    command: dark-factory-pave-close-or-suspend
+    depends_on: [evidence-report]
+    trigger_rule: all_done
+    context: fresh
+
+  - id: self-learning-task
+    command: dark-factory-pave-self-learning
+    depends_on: [close-or-suspend]
+    trigger_rule: all_done
+    context: fresh
