@@ -5,6 +5,7 @@ param(
 
     [string] $BoardName = "Peter's Board",
     [string] $StaffCode = "PWS",
+    [bool] $ScoutDryRun = $true,
     [int] $BackendPort = 8000,
     [int] $FrontendPort = 5173
 )
@@ -125,6 +126,7 @@ function Start-FactoryService(
 `$env:FACTORY_WORKER_TOKEN = '$token'
 `$env:PAVE_BOARD_NAME = '$BoardName'
 `$env:PAVE_STAFF_CODE = '$StaffCode'
+`$env:FACTORY_SCOUT_DRY_RUN = '$ScoutDryRun'
 `$env:FACTORY_API_BASE = 'http://127.0.0.1:$BackendPort/api'
 `$env:VITE_API_BASE = '/api'
 $Command *> '$logPath'

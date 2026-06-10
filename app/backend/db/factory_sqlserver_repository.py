@@ -791,6 +791,7 @@ async def finish_scout_cycle(
     *,
     status: str,
     selected_pave_task_id: str | None = None,
+    candidate_count: int | None = None,
     decision: str | None = None,
     summary: str | None = None,
     output_snapshot: dict[str, Any] | None = None,
@@ -800,12 +801,14 @@ async def finish_scout_cycle(
             conn,
             """
             UPDATE dbo.factory_scout_cycles
-            SET status = ?, selected_pave_task_id = ?, decision = ?, summary = ?,
+            SET status = ?, selected_pave_task_id = ?, candidate_count = COALESCE(?, candidate_count),
+                decision = ?, summary = ?,
                 output_snapshot = ?, finished_at = SYSDATETIMEOFFSET()
             WHERE id = ?
             """,
             status,
             selected_pave_task_id,
+            candidate_count,
             decision,
             summary,
             _to_json(output_snapshot),

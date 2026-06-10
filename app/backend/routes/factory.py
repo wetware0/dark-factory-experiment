@@ -83,6 +83,7 @@ class ScoutCycleCreate(BaseModel):
 class ScoutCycleFinish(BaseModel):
     status: str
     selected_pave_task_id: str | None = None
+    candidate_count: int | None = None
     decision: str | None = None
     summary: str | None = None
     output_snapshot: dict[str, Any] = Field(default_factory=dict)

@@ -25,6 +25,12 @@ from typing import Any
 import httpx
 
 from backend import config
+from backend.factory.edi_cli import (
+    EdiCli,
+    EdiCliError,
+    find_playing_tasks,
+    select_startable_candidate,
+)
 
 DEFAULT_API_BASE = os.environ.get("FACTORY_API_BASE", "http://127.0.0.1:8000/api")
 REQUIRED_MCPS = ("ediprod", "wtgkb", "sbkb")
@@ -108,6 +114,13 @@ def _detect_staff_code() -> tuple[str, str]:
     detected = os.environ.get("PAVE_DETECTED_STAFF_CODE", "").strip()
     if detected:
         return (detected, "detected from PAVE_DETECTED_STAFF_CODE")
+    if shutil.which("edi"):
+        try:
+            profile = EdiCli().get_own_staff_profile()
+            return (profile.code, f"detected from edi OAuth profile: {profile.display_name or profile.code}")
+        except EdiCliError as exc:
+            configured = os.environ.get("PAVE_STAFF_CODE", config.PAVE_STAFF_CODE).strip()
+            return (configured, f"using configured fallback; edi staff detection failed: {exc}")
     configured = os.environ.get("PAVE_STAFF_CODE", config.PAVE_STAFF_CODE).strip()
     return (configured, "using configured fallback; ediProd OAuth staff-code lookup unavailable")
 
@@ -117,6 +130,14 @@ def probe_mcps() -> list[McpProbeResult]:
     edi_cli = shutil.which("edi")
     adapter = os.environ.get("FACTORY_PAVE_ADAPTER", "auto").strip().lower()
     adapter_url = os.environ.get("FACTORY_PAVE_ADAPTER_URL", "").strip()
+    edi_profile: dict[str, Any] | None = None
+    edi_auth_error = ""
+    if edi_cli:
+        try:
+            profile = EdiCli(edi_cli).get_own_staff_profile()
+            edi_profile = profile.raw
+        except EdiCliError as exc:
+            edi_auth_error = str(exc)
     results: list[McpProbeResult] = []
 
     for name in REQUIRED_MCPS:
@@ -126,6 +147,7 @@ def probe_mcps() -> list[McpProbeResult]:
             "codex_mcp_line": line,
             "adapter": adapter,
             "edi_cli": edi_cli,
+            "edi_profile": edi_profile,
         }
         if returncode != 0:
             results.append(
@@ -160,6 +182,16 @@ def probe_mcps() -> list[McpProbeResult]:
                 )
             )
             continue
+        if name == "ediprod" and adapter in {"auto", "edi-cli"} and edi_cli and edi_auth_error:
+            results.append(
+                McpProbeResult(
+                    name=name,
+                    status="unauthenticated",
+                    detail=f"edi CLI is present but staff profile lookup failed: {edi_auth_error}",
+                    metadata={**metadata, "edi_auth_error": edi_auth_error},
+                )
+            )
+            continue
         if name == "ediprod" and adapter == "ediprod-mcp" and not adapter_url:
             results.append(
                 McpProbeResult(
@@ -174,7 +206,11 @@ def probe_mcps() -> list[McpProbeResult]:
             McpProbeResult(
                 name=name,
                 status="ready",
-                detail=f"{name} is configured",
+                detail=(
+                    f"{name} is configured"
+                    if name != "ediprod" or not edi_profile
+                    else f"ediprod is configured; edi CLI authenticated as {edi_profile.get('code')}"
+                ),
                 metadata=metadata,
             )
         )
@@ -183,10 +219,32 @@ def probe_mcps() -> list[McpProbeResult]:
 
 def collect_tooling_inventory(instance_id: str) -> list[dict[str, Any]]:
     codex_returncode, codex_output = _codex_mcp_lines()
+    edi_version = None
+    edi_status = "missing"
+    edi_detail = "edi executable not found on PATH"
+    if shutil.which("edi"):
+        try:
+            edi_version = EdiCli().version()
+            edi_status = "present"
+            edi_detail = "ok"
+        except EdiCliError as exc:
+            edi_status = "error"
+            edi_detail = str(exc)
     sbkb_head, sbkb_detail = _git_head("C:/git/WTG.sbkb-mcp")
     prompts_head, prompts_detail = _git_head("C:/git/WTG.AI.Prompts")
     second_brain_exists = Path("C:/git/SecondBrain").exists()
     records = [
+        {
+            "instance_id": instance_id,
+            "tool_type": "cli",
+            "name": "edi",
+            "installed_version": edi_version,
+            "latest_version": None,
+            "status": edi_status,
+            "source_url": "https://github.com/WiseTechGlobal/mcp-ediprod",
+            "update_available": False,
+            "metadata": {"detail": edi_detail, "path": shutil.which("edi")},
+        },
         {
             "instance_id": instance_id,
             "tool_type": "mcp",
@@ -386,13 +444,191 @@ async def scout_once(api: FactoryApi, *, board_name: str, staff_code: str) -> No
         )
         return
 
+    if not shutil.which("edi"):
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "stalled",
+                "decision": "edi_cli_missing",
+                "summary": "All MCPs are configured, but edi CLI is unavailable for PAVE polling.",
+                "output_snapshot": {"readiness": [item.__dict__ for item in readiness]},
+            },
+        )
+        return
+
+    edi = EdiCli()
+    tasks = edi.list_staff_tasks(
+        staff_code,
+        include_capability_pool=config.FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL,
+    )
+    playing_tasks = find_playing_tasks(tasks)
+    board_candidates = [
+        task for task in tasks if task.board_name == board_name and task.ready_to_start
+    ]
+
+    if playing_tasks:
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "blocked",
+                "decision": "playing_task_present",
+                "summary": f"{staff_code} already has {len(playing_tasks)} playing PAVE task(s).",
+                "candidate_count": len(board_candidates),
+                "output_snapshot": {
+                    "playing_tasks": [task.raw for task in playing_tasks],
+                    "board_candidates": [task.raw for task in board_candidates[:10]],
+                },
+            },
+        )
+        return
+
+    candidate = select_startable_candidate(tasks, board_name=board_name)
+    if candidate is None:
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "ready",
+                "decision": "no_startable_work",
+                "summary": f"No ready-to-start tasks found on {board_name} for {staff_code}.",
+                "candidate_count": 0,
+                "output_snapshot": {
+                    "task_count": len(tasks),
+                    "board_candidate_count": len(board_candidates),
+                },
+            },
+        )
+        return
+
+    resolved = edi.resolve_task(candidate)
+    if resolved is None:
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "stalled",
+                "decision": "task_id_resolution_failed",
+                "summary": (
+                    f"Selected {candidate.job_number} / {candidate.task_type} but could not "
+                    "resolve a unique PAVE task id."
+                ),
+                "candidate_count": len(board_candidates),
+                "output_snapshot": {
+                    "candidate": candidate.raw,
+                    "resolution": "no_unique_match",
+                },
+            },
+        )
+        return
+
     await api.patch(
         f"/factory/worker/scout-cycles/{cycle['id']}",
         {
             "status": "ready",
-            "decision": "ready_for_pave_poll",
-            "summary": "All required MCPs are ready. Concrete startable-task polling is adapter-owned.",
-            "output_snapshot": {"readiness": [item.__dict__ for item in readiness]},
+            "selected_pave_task_id": resolved.task_id,
+            "decision": "selected_startable_task",
+            "summary": (
+                f"Selected {candidate.job_number} / {candidate.task_type}: "
+                f"{candidate.description}"
+            ),
+            "candidate_count": len(board_candidates),
+            "output_snapshot": {
+                "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+                "candidate": candidate.raw,
+                "resolved_task": {
+                    "task_id": resolved.task_id,
+                    "workflow_id": resolved.workflow_id,
+                    "task": resolved.raw,
+                },
+            },
+        },
+    )
+
+    run_status = "queued" if config.FACTORY_SCOUT_DRY_RUN else "claimed"
+    run_phase = "scout_handoff" if config.FACTORY_SCOUT_DRY_RUN else "claimed_started"
+    lifecycle_output = ""
+    if not config.FACTORY_SCOUT_DRY_RUN:
+        fresh_tasks = edi.list_staff_tasks(
+            staff_code,
+            include_capability_pool=config.FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL,
+        )
+        fresh_playing = find_playing_tasks(fresh_tasks)
+        if fresh_playing:
+            await api.patch(
+                f"/factory/worker/scout-cycles/{cycle['id']}",
+                {
+                    "status": "blocked",
+                    "decision": "playing_task_appeared_before_start",
+                    "summary": "A playing task appeared before claim/start; PAVE mutation skipped.",
+                    "output_snapshot": {"playing_tasks": [task.raw for task in fresh_playing]},
+                },
+            )
+            return
+        lifecycle_output = edi.start_task(resolved.task_id)
+
+    run = await api.post(
+        "/factory/worker/runs",
+        {
+            "instance_id": api.instance_id,
+            "pave_task_id": resolved.task_id,
+            "pave_work_item_id": candidate.job_number if candidate.job_number.startswith("WI") else None,
+            "pave_incident_id": candidate.job_number if candidate.job_number.startswith("CS") else None,
+            "pave_task_title": f"{candidate.job_number} / {candidate.task_type}: {candidate.description}",
+            "pave_board_name": board_name,
+            "staff_code": staff_code,
+            "status": run_status,
+            "phase": run_phase,
+            "workflow_id": resolved.workflow_id,
+            "workflow_name": "pave-dark-factory-execute-task",
+            "metadata": {
+                "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+                "candidate": candidate.raw,
+                "resolved_task": resolved.raw,
+                "lifecycle_output": lifecycle_output,
+            },
+        },
+    )
+    if not config.FACTORY_SCOUT_DRY_RUN:
+        await api.patch(
+            f"/factory/worker/runs/{run['id']}",
+            {
+                "set_claim_attempted": True,
+                "set_claimed": True,
+                "set_started": True,
+                "metadata": {"lifecycle_output": lifecycle_output},
+            },
+        )
+    await api.post(
+        f"/factory/worker/runs/{run['id']}/events",
+        {
+            "instance_id": api.instance_id,
+            "level": "info",
+            "phase": run_phase,
+            "message": (
+                "Scout selected a startable PAVE task in dry-run mode."
+                if config.FACTORY_SCOUT_DRY_RUN
+                else "Scout claimed and started the selected PAVE task through edi CLI."
+            ),
+            "payload": {
+                "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+                "candidate": candidate.raw,
+                "resolved_task_id": resolved.task_id,
+                "workflow_id": resolved.workflow_id,
+            },
+        },
+    )
+    await api.post(
+        f"/factory/worker/runs/{run['id']}/artifacts",
+        {
+            "category": "Specs",
+            "name": "PAVE scout handoff",
+            "status": "created",
+            "content_type": "application/json",
+            "summary": f"{candidate.job_number} / {candidate.task_type}: {candidate.description}",
+            "payload": {
+                "candidate": candidate.raw,
+                "resolved_task_id": resolved.task_id,
+                "workflow_id": resolved.workflow_id,
+                "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+            },
         },
     )
 
