@@ -68,8 +68,10 @@ The script creates a worker token at `.factory/factory-worker-token.txt`, stores
 Default local operating inputs:
 
 - PAVE board: `Peter's Board`
-- staff code: `PWS`
+- execution staff code: `C50`
+- guardian staff code: `PWS`
 - scout dry-run: `true`
+- Archon dispatch: `false`
 
 Override these with script parameters or environment variables when running another worker pool.
 
@@ -78,7 +80,8 @@ The scout uses the `edi` CLI when present:
 - `edi staff get` detects the staff code attached to the active OAuth credentials.
 - `edi staff tasks --include-capability-pool` performs the low-token board scan.
 - `edi workflow list` and `edi task list` resolve the selected staff-task row to a concrete PAVE task ID.
-- `edi task start` is only called when `FACTORY_SCOUT_DRY_RUN=false`; the default service script keeps dry-run enabled.
+- `edi task start` is only called when `FACTORY_SCOUT_DRY_RUN=false`, `FACTORY_ARCHON_EXECUTE=true`, the play guard passes, and the OAuth staff code is allowed to mutate as the execution staff code.
+- If the worker detects a clarity gap or failure after a task is in play, the guardian path appends task notes, suspends the task when possible, and assigns it to `PWS`.
 
 ---
 
@@ -117,9 +120,11 @@ Important design constraints:
 - The scout is cheap and conservative. It polls PAVE, checks the staff-code play guard, and passes only compact task context to the expensive agent.
 - Claim safety comes from PAVE lifecycle operations, not portal-side locks.
 - A task must not start if starting it would suspend another playing task for the staff code.
+- This instance polls `C50` tasks. `PWS` is the guardian/escalation staff code, not the execution queue.
 - The critic is a normal Archon DAG node.
 - Self-learning is a dedicated PAVE task at the end of the work item or incident lifecycle.
 - Skills/plugins are versioned operational dependencies. The portal tracks installed versions, latest known versions, update status, and update jobs.
+- Dashboard tooling update jobs are executed by the worker for known local git-backed tooling (`WTG.sbkb-mcp`, `WTG.AI.Prompts`) using fast-forward pulls. OAuth MCP reauth remains a separate stalled-state action.
 
 ---
 
@@ -175,8 +180,10 @@ Known live-tool state:
 
 - `ediprod`, `wtgkb`, and `sbkb` are configured in Codex.
 - The callable ediProd MCP mutation namespace was not exposed to this implementation thread.
-- The local `edi` CLI is now installed and can detect the OAuth staff code, list PWS tasks, and resolve a Peter's Board startable task to a concrete task ID.
-- The scout defaults to dry-run. Set `FACTORY_SCOUT_DRY_RUN=false` only when the operator wants the scout to call `edi task start` after the play guard passes.
+- The local `edi` CLI is now installed and detects the current OAuth staff code as `PWS`.
+- A read-only probe confirms `C50` exists as `Copilot Code Reviewer (C50)` and currently has zero returned tasks on `Peter's Board`.
+- The scout defaults to dry-run. Set `FACTORY_SCOUT_DRY_RUN=false` and `FACTORY_ARCHON_EXECUTE=true` only when the operator wants the scout to call `edi task start` after the play guard and OAuth staff guard both pass.
+- With the current `PWS` OAuth profile, live `C50` mutation is blocked unless `FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true` is explicitly set.
 
 ---
 

@@ -4,8 +4,10 @@ param(
     [string] $Action = "status",
 
     [string] $BoardName = "Peter's Board",
-    [string] $StaffCode = "PWS",
+    [string] $StaffCode = "C50",
+    [string] $GuardianStaffCode = "PWS",
     [bool] $ScoutDryRun = $true,
+    [bool] $ArchonExecute = $false,
     [int] $BackendPort = 8000,
     [int] $FrontendPort = 5173
 )
@@ -126,7 +128,9 @@ function Start-FactoryService(
 `$env:FACTORY_WORKER_TOKEN = '$token'
 `$env:PAVE_BOARD_NAME = '$BoardName'
 `$env:PAVE_STAFF_CODE = '$StaffCode'
+`$env:PAVE_GUARDIAN_STAFF_CODE = '$GuardianStaffCode'
 `$env:FACTORY_SCOUT_DRY_RUN = '$ScoutDryRun'
+`$env:FACTORY_ARCHON_EXECUTE = '$ArchonExecute'
 `$env:FACTORY_API_BASE = 'http://127.0.0.1:$BackendPort/api'
 `$env:VITE_API_BASE = '/api'
 $Command *> '$logPath'
@@ -202,7 +206,7 @@ function Start-Factory {
     Start-FactoryService `
         -Name "scout" `
         -WorkingDirectory $appDir `
-        -Command "uv --project backend run python -m backend.factory.worker --board-name '$BoardName' --staff-code '$StaffCode'"
+        -Command "uv --project backend run python -m backend.factory.worker --board-name '$BoardName' --staff-code '$StaffCode' --guardian-staff-code '$GuardianStaffCode'"
 
     Write-Host "Factory dashboard: http://127.0.0.1:$FrontendPort/factory"
 }

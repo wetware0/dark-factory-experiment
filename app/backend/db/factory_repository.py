@@ -1066,6 +1066,41 @@ async def list_tooling_update_jobs(limit: int = 50) -> list[dict[str, Any]]:
     return _rows_to_dicts(rows)
 
 
+async def update_tooling_update_job(
+    job_id: str,
+    *,
+    status: str | None = None,
+    log_entry: dict[str, Any] | None = None,
+    error_message: str | None = None,
+    set_started: bool = False,
+    set_finished: bool = False,
+) -> dict[str, Any] | None:
+    pool = get_pg_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE factory_tooling_update_jobs
+            SET status = COALESCE($2, status),
+                started_at = CASE WHEN $3 THEN now() ELSE started_at END,
+                finished_at = CASE WHEN $4 THEN now() ELSE finished_at END,
+                log = CASE
+                    WHEN $5::jsonb IS NULL THEN log
+                    ELSE log || jsonb_build_array($5::jsonb)
+                END,
+                error_message = COALESCE($6, error_message)
+            WHERE id = $1::uuid
+            RETURNING *
+            """,
+            job_id,
+            status,
+            set_started,
+            set_finished,
+            _to_json(log_entry) if log_entry is not None else None,
+            error_message,
+        )
+    return _row_to_dict(row)
+
+
 async def add_audit_entry(
     *,
     actor_type: str,

@@ -31,12 +31,15 @@ PAVE allows only one playing task per staff code. Starting a different task can 
 
 Required sequence:
 
-1. Detect the staff code for the active ediProd OAuth identity when possible.
-2. Fall back to configured `PAVE_STAFF_CODE` only when detection is unavailable, and mark readiness as degraded.
-3. Check current playing task state for that staff code.
-4. Re-read the selected task immediately before claim/start.
-5. Use PAVE lifecycle operations to claim and start the task.
-6. Execute only if claim/start succeeds.
+1. Treat configured `PAVE_STAFF_CODE` as the execution staff code. For this experiment it is `C50`.
+2. Treat configured `PAVE_GUARDIAN_STAFF_CODE` as the human guardian/escalation owner. For this experiment it is `PWS`.
+3. Detect the staff code for the active ediProd OAuth identity when possible.
+4. Permit read-only polling when OAuth staff differs from execution staff.
+5. Block live claim/start when OAuth staff differs from execution staff unless an operator explicitly enables `FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true`.
+6. Check current playing task state for the execution staff code.
+7. Re-read the selected task immediately before claim/start.
+8. Use PAVE lifecycle operations to claim and start the task.
+9. Execute only if claim/start succeeds.
 
 Never start a task as a side effect of polling. Never start a second task to inspect it. Never continue after a lifecycle call returns an ambiguous result without reconciling the PAVE state.
 
@@ -127,7 +130,7 @@ Every run must create an evidence report against the PAVE job in eDoc.
 
 The evidence report must include:
 
-- PAVE board, staff code, task ID, work item or incident, workflow ID, and claim/start timestamps;
+- PAVE board, execution staff code, guardian staff code, task ID, work item or incident, workflow ID, and claim/start timestamps;
 - full dashboard log as shown to the user;
 - artifact index with Specs, Coding, Review, Critic, Validation, eDoc Evidence, and Self Learning categories;
 - repository set and PR set;
@@ -145,7 +148,7 @@ If eDoc upload is unavailable, the worker records the failed upload attempt, kee
 
 The worker may complete a PAVE task only when the task is started, the required artifacts exist, validation policy is satisfied, and evidence reporting succeeded or was explicitly waived.
 
-If the quality iteration close path is unavailable through MCP, the worker must suspend the task and assign it to the configured human staff code, currently `PWS` for this experiment.
+If the quality iteration close path is unavailable through MCP, the worker must suspend the task and assign it to the configured guardian staff code, currently `PWS` for this experiment.
 
 Never mark a run completed in the portal if PAVE could not be updated truthfully.
 

@@ -283,6 +283,14 @@ export interface FactorySummary {
   stalled_mcp_count: number;
 }
 
+export interface FactoryConfig {
+  board_name: string;
+  execution_staff_code: string;
+  guardian_staff_code: string;
+  scout_dry_run: boolean;
+  archon_execute: boolean;
+}
+
 export interface FactoryInstance {
   id: string;
   name: string;
@@ -444,6 +452,7 @@ export interface FactoryLearningAssessment {
 }
 
 export const getFactorySummary = () => request<FactorySummary>('/factory/dashboard/summary');
+export const getFactoryConfig = () => request<FactoryConfig>('/factory/dashboard/config');
 export const getFactoryStalled = () =>
   request<{ mcps: FactoryMcpReadiness[]; runs: FactoryRun[] }>('/factory/dashboard/stalled');
 export const getFactoryQueue = () => request<{ runs: FactoryRun[] }>('/factory/dashboard/queue');

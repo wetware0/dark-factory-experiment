@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import platform
 import shutil
@@ -19,6 +20,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,7 @@ from backend.factory.edi_cli import (
 
 DEFAULT_API_BASE = os.environ.get("FACTORY_API_BASE", "http://127.0.0.1:8000/api")
 REQUIRED_MCPS = ("ediprod", "wtgkb", "sbkb")
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,24 @@ class McpProbeResult:
     status: str
     detail: str
     metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class StaffMutationCheck:
+    allowed: bool
+    detected_staff_code: str
+    detail: str
+    metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ArchonDispatchResult:
+    status: str
+    detail: str
+    command: list[str]
+    handoff_path: str | None
+    stdout: str
+    stderr: str
 
 
 class FactoryApi:
@@ -65,6 +86,19 @@ class FactoryApi:
 
     async def patch(self, path: str, payload: dict[str, Any]) -> Any:
         return await self._request("PATCH", path, payload)
+
+    async def get(self, path: str) -> Any:
+        return await self._request("GET", path)
+
+    async def get_text(self, path: str) -> str:
+        headers = {
+            "X-Factory-Worker-Token": self.token,
+            "X-Factory-Instance-Id": self.instance_id,
+        }
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=20) as client:
+            response = await client.get(path, headers=headers)
+            response.raise_for_status()
+            return response.text
 
 
 def _run_command(args: list[str], timeout: int = 10, cwd: str | None = None) -> subprocess.CompletedProcess:
@@ -102,6 +136,24 @@ def _git_head(path: str) -> tuple[str | None, str]:
     return (result.stdout.strip(), "ok")
 
 
+def _git_remote_head(path: str) -> tuple[str | None, str]:
+    git_dir = Path(path)
+    if not git_dir.exists():
+        return (None, "path does not exist")
+    if not (git_dir / ".git").exists():
+        return (None, "path is not a git repository")
+    remote = _run_command(["git", "remote", "get-url", "origin"], cwd=str(git_dir), timeout=10)
+    if remote.returncode != 0:
+        return (None, remote.stderr.strip() or remote.stdout.strip() or "git remote lookup failed")
+    result = _run_command(["git", "ls-remote", "origin", "HEAD"], cwd=str(git_dir), timeout=30)
+    if result.returncode != 0:
+        return (None, result.stderr.strip() or result.stdout.strip() or "git ls-remote failed")
+    first = result.stdout.strip().splitlines()[0].split()[0] if result.stdout.strip() else ""
+    if not first:
+        return (None, "remote HEAD not found")
+    return (first[:12], f"origin {remote.stdout.strip()}")
+
+
 def _probe_mcp_configured(name: str, codex_output: str) -> tuple[bool, str]:
     for line in codex_output.splitlines():
         parts = line.split()
@@ -125,7 +177,42 @@ def _detect_staff_code() -> tuple[str, str]:
     return (configured, "using configured fallback; ediProd OAuth staff-code lookup unavailable")
 
 
-def probe_mcps() -> list[McpProbeResult]:
+def _staff_mutation_check(staff_code: str) -> StaffMutationCheck:
+    detected_staff_code, detection_detail = _detect_staff_code()
+    detected = detected_staff_code.upper()
+    configured = staff_code.strip().upper()
+    allowed = detected == configured or config.FACTORY_ALLOW_OAUTH_STAFF_MISMATCH
+    detail = (
+        f"OAuth staff code {detected} matches execution staff code {configured}."
+        if detected == configured
+        else (
+            f"OAuth staff code {detected} differs from execution staff code {configured}; "
+            "live PAVE mutation is blocked unless FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true."
+        )
+    )
+    if config.FACTORY_ALLOW_OAUTH_STAFF_MISMATCH and detected != configured:
+        detail = (
+            f"OAuth staff code {detected} differs from execution staff code {configured}; "
+            "override FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true permits live PAVE mutation."
+        )
+    return StaffMutationCheck(
+        allowed=allowed,
+        detected_staff_code=detected_staff_code,
+        detail=detail,
+        metadata={
+            "detection_detail": detection_detail,
+            "configured_staff_code": staff_code,
+            "detected_staff_code": detected_staff_code,
+            "allow_oauth_staff_mismatch": config.FACTORY_ALLOW_OAUTH_STAFF_MISMATCH,
+        },
+    )
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def probe_mcps(execution_staff_code: str | None = None) -> list[McpProbeResult]:
     returncode, codex_output = _codex_mcp_lines()
     edi_cli = shutil.which("edi")
     adapter = os.environ.get("FACTORY_PAVE_ADAPTER", "auto").strip().lower()
@@ -192,6 +279,31 @@ def probe_mcps() -> list[McpProbeResult]:
                 )
             )
             continue
+        if name == "ediprod" and execution_staff_code and edi_cli and edi_profile:
+            detected_staff_code = str(edi_profile.get("code") or "").strip().upper()
+            expected_staff_code = execution_staff_code.strip().upper()
+            if (
+                detected_staff_code
+                and detected_staff_code != expected_staff_code
+                and not config.FACTORY_ALLOW_OAUTH_STAFF_MISMATCH
+                and not config.FACTORY_SCOUT_DRY_RUN
+            ):
+                results.append(
+                    McpProbeResult(
+                        name=name,
+                        status="degraded",
+                        detail=(
+                            f"ediprod is authenticated as {detected_staff_code}, but the "
+                            f"execution staff code is {expected_staff_code}; live mutation is blocked."
+                        ),
+                        metadata={
+                            **metadata,
+                            "execution_staff_code": execution_staff_code,
+                            "allow_oauth_staff_mismatch": config.FACTORY_ALLOW_OAUTH_STAFF_MISMATCH,
+                        },
+                    )
+                )
+                continue
         if name == "ediprod" and adapter == "ediprod-mcp" and not adapter_url:
             results.append(
                 McpProbeResult(
@@ -209,9 +321,23 @@ def probe_mcps() -> list[McpProbeResult]:
                 detail=(
                     f"{name} is configured"
                     if name != "ediprod" or not edi_profile
-                    else f"ediprod is configured; edi CLI authenticated as {edi_profile.get('code')}"
+                    else (
+                        f"ediprod is configured; edi CLI authenticated as {edi_profile.get('code')}"
+                        + (
+                            f" while polling execution staff {execution_staff_code}"
+                            if execution_staff_code
+                            and str(edi_profile.get("code") or "").strip().upper()
+                            != execution_staff_code.strip().upper()
+                            else ""
+                        )
+                    )
                 ),
-                metadata=metadata,
+                metadata={
+                    **metadata,
+                    "execution_staff_code": execution_staff_code,
+                    "allow_oauth_staff_mismatch": config.FACTORY_ALLOW_OAUTH_STAFF_MISMATCH,
+                    "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+                },
             )
         )
     return results
@@ -231,7 +357,9 @@ def collect_tooling_inventory(instance_id: str) -> list[dict[str, Any]]:
             edi_status = "error"
             edi_detail = str(exc)
     sbkb_head, sbkb_detail = _git_head("C:/git/WTG.sbkb-mcp")
+    sbkb_latest, sbkb_latest_detail = _git_remote_head("C:/git/WTG.sbkb-mcp")
     prompts_head, prompts_detail = _git_head("C:/git/WTG.AI.Prompts")
+    prompts_latest, prompts_latest_detail = _git_remote_head("C:/git/WTG.AI.Prompts")
     second_brain_exists = Path("C:/git/SecondBrain").exists()
     records = [
         {
@@ -272,22 +400,28 @@ def collect_tooling_inventory(instance_id: str) -> list[dict[str, Any]]:
             "tool_type": "mcp",
             "name": "sbkb",
             "installed_version": sbkb_head,
-            "latest_version": None,
+            "latest_version": sbkb_latest,
             "status": "present" if sbkb_head else "missing",
             "source_url": "C:/git/WTG.sbkb-mcp",
-            "update_available": False,
-            "metadata": {"detail": sbkb_detail, "second_brain_exists": second_brain_exists},
+            "update_available": bool(sbkb_head and sbkb_latest and sbkb_head != sbkb_latest),
+            "metadata": {
+                "detail": sbkb_detail,
+                "latest_detail": sbkb_latest_detail,
+                "second_brain_exists": second_brain_exists,
+            },
         },
         {
             "instance_id": instance_id,
             "tool_type": "prompt_repo",
             "name": "WTG.AI.Prompts",
             "installed_version": prompts_head,
-            "latest_version": None,
+            "latest_version": prompts_latest,
             "status": "present" if prompts_head else "missing",
             "source_url": "https://github.com/WiseTechGlobal/WTG.AI.Prompts",
-            "update_available": False,
-            "metadata": {"detail": prompts_detail},
+            "update_available": bool(
+                prompts_head and prompts_latest and prompts_head != prompts_latest
+            ),
+            "metadata": {"detail": prompts_detail, "latest_detail": prompts_latest_detail},
         },
     ]
     return records
@@ -306,7 +440,9 @@ async def wait_for_backend(api: FactoryApi, timeout_seconds: int = 60) -> None:
     raise RuntimeError(f"Factory backend did not become reachable at {api.base_url}")
 
 
-async def register_instance(api: FactoryApi, *, board_name: str, staff_code: str) -> None:
+async def register_instance(
+    api: FactoryApi, *, board_name: str, staff_code: str, guardian_staff_code: str
+) -> None:
     detected_staff_code, detection_detail = _detect_staff_code()
     await api.post(
         "/factory/worker/instances/register",
@@ -332,13 +468,17 @@ async def register_instance(api: FactoryApi, *, board_name: str, staff_code: str
                 "python": sys.version.split()[0],
                 "platform": platform.platform(),
                 "staff_code_detection": detection_detail,
+                "execution_staff_code": staff_code,
+                "guardian_staff_code": guardian_staff_code,
+                "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+                "archon_execute": config.FACTORY_ARCHON_EXECUTE,
             },
         },
     )
 
 
-async def report_readiness(api: FactoryApi) -> list[McpProbeResult]:
-    results = probe_mcps()
+async def report_readiness(api: FactoryApi, *, staff_code: str) -> list[McpProbeResult]:
+    results = probe_mcps(staff_code)
     for result in results:
         await api.post(
             "/factory/worker/mcps/readiness",
@@ -368,10 +508,350 @@ async def report_tooling(api: FactoryApi) -> None:
         await api.post("/factory/worker/tooling/inventory", record)
 
 
-async def scout_once(api: FactoryApi, *, board_name: str, staff_code: str) -> None:
-    await register_instance(api, board_name=board_name, staff_code=staff_code)
-    readiness = await report_readiness(api)
+def _tooling_update_path(tool: dict[str, Any]) -> Path | None:
+    name = str(tool.get("name") or "")
+    if name == "sbkb":
+        return Path("C:/git/WTG.sbkb-mcp")
+    if name == "WTG.AI.Prompts":
+        return Path("C:/git/WTG.AI.Prompts")
+    return None
+
+
+async def process_tooling_update_jobs(api: FactoryApi) -> None:
+    payload = await api.get("/factory/worker/tooling/update-jobs")
+    for job in payload.get("jobs", []):
+        job_id = str(job.get("id"))
+        tool = job.get("tool") or {}
+        tool_name = str(tool.get("name") or job.get("tool_id") or "unknown")
+        await api.patch(
+            f"/factory/worker/tooling/update-jobs/{job_id}",
+            {
+                "status": "running",
+                "set_started": True,
+                "log_entry": {
+                    "time": _now_iso(),
+                    "message": f"Starting tooling update for {tool_name}",
+                },
+            },
+        )
+        path = _tooling_update_path(tool)
+        if path is None:
+            await api.patch(
+                f"/factory/worker/tooling/update-jobs/{job_id}",
+                {
+                    "status": "failed",
+                    "set_finished": True,
+                    "error_message": f"No automated update handler for {tool_name}",
+                    "log_entry": {
+                        "time": _now_iso(),
+                        "message": f"No automated update handler for {tool_name}",
+                    },
+                },
+            )
+            continue
+        if not path.exists():
+            await api.patch(
+                f"/factory/worker/tooling/update-jobs/{job_id}",
+                {
+                    "status": "failed",
+                    "set_finished": True,
+                    "error_message": f"Tooling path does not exist: {path}",
+                    "log_entry": {
+                        "time": _now_iso(),
+                        "message": f"Tooling path does not exist: {path}",
+                    },
+                },
+            )
+            continue
+        result = _run_command(["git", "pull", "--ff-only"], cwd=str(path), timeout=120)
+        status = "completed" if result.returncode == 0 else "failed"
+        await api.patch(
+            f"/factory/worker/tooling/update-jobs/{job_id}",
+            {
+                "status": status,
+                "set_finished": True,
+                "error_message": None if result.returncode == 0 else result.stderr.strip(),
+                "log_entry": {
+                    "time": _now_iso(),
+                    "command": "git pull --ff-only",
+                    "cwd": str(path),
+                    "returncode": result.returncode,
+                    "stdout": result.stdout.strip(),
+                    "stderr": result.stderr.strip(),
+                },
+            },
+        )
+    if payload.get("jobs"):
+        await report_tooling(api)
+
+
+def _run_artifacts_dir(run_id: str) -> Path:
+    path = REPO_ROOT / ".factory" / "runs" / run_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _write_json_artifact(run_id: str, name: str, payload: dict[str, Any]) -> Path:
+    path = _run_artifacts_dir(run_id) / name
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def _dispatch_archon_workflow(run_id: str, handoff: dict[str, Any]) -> ArchonDispatchResult:
+    handoff_path = _write_json_artifact(run_id, "pave-task-handoff.json", handoff)
+    if not config.FACTORY_ARCHON_EXECUTE:
+        return ArchonDispatchResult(
+            status="skipped",
+            detail="FACTORY_ARCHON_EXECUTE=false; Archon dispatch skipped.",
+            command=[],
+            handoff_path=str(handoff_path),
+            stdout="",
+            stderr="",
+        )
+
+    archon = shutil.which("archon")
+    if not archon:
+        return ArchonDispatchResult(
+            status="failed",
+            detail="archon executable not found on PATH",
+            command=[],
+            handoff_path=str(handoff_path),
+            stdout="",
+            stderr="",
+        )
+
+    message = (
+        f"Execute PAVE dark factory run {run_id}. "
+        f"Read the handoff JSON at {handoff_path} and follow the C50/PWS guardian policy."
+    )
+    command = [
+        archon,
+        "workflow",
+        "run",
+        config.FACTORY_ARCHON_WORKFLOW_NAME,
+        "--cwd",
+        str(REPO_ROOT),
+        "--detach",
+        message,
+    ]
+    try:
+        result = _run_command(command, timeout=60, cwd=str(REPO_ROOT))
+    except subprocess.TimeoutExpired:
+        return ArchonDispatchResult(
+            status="failed",
+            detail="archon workflow dispatch timed out",
+            command=command,
+            handoff_path=str(handoff_path),
+            stdout="",
+            stderr="",
+        )
+    status = "running" if result.returncode == 0 else "failed"
+    detail = (
+        "Archon workflow dispatched in detached mode."
+        if result.returncode == 0
+        else "Archon workflow dispatch failed."
+    )
+    return ArchonDispatchResult(
+        status=status,
+        detail=detail,
+        command=command,
+        handoff_path=str(handoff_path),
+        stdout=result.stdout.strip(),
+        stderr=result.stderr.strip(),
+    )
+
+
+async def escalate_task_to_guardian(
+    api: FactoryApi,
+    *,
+    task_id: str,
+    guardian_staff_code: str,
+    reason: str,
+    run_id: str | None = None,
+    job_number: str | None = None,
+    phase: str = "guardian_escalation",
+) -> dict[str, Any]:
+    edi = EdiCli()
+    note = "\n".join(
+        [
+            "Dark Factory guardian escalation",
+            f"Time: {_now_iso()}",
+            f"Task: {task_id}",
+            f"Guardian: {guardian_staff_code}",
+            f"Reason: {reason}",
+        ]
+    )
+    operations: dict[str, Any] = {}
+    for name, operation in (
+        ("notes_append", lambda: edi.append_task_notes(task_id, note)),
+        ("suspend", lambda: edi.suspend_task(task_id)),
+        ("assign", lambda: edi.assign_task(task_id, guardian_staff_code)),
+    ):
+        try:
+            operations[name] = {"status": "ok", "output": operation()}
+        except EdiCliError as exc:
+            operations[name] = {"status": "failed", "error": str(exc)}
+
+    assigned = operations.get("assign", {}).get("status") == "ok"
+    suspended = operations.get("suspend", {}).get("status") == "ok"
+    escalation_status = "suspended" if assigned and suspended else "stalled" if assigned else "failed"
+    if run_id is None:
+        run = await api.post(
+            "/factory/worker/runs",
+            {
+                "instance_id": api.instance_id,
+                "pave_task_id": task_id,
+                "pave_work_item_id": job_number if (job_number or "").startswith("WI") else None,
+                "pave_incident_id": job_number if (job_number or "").startswith("CS") else None,
+                "pave_task_title": f"Guardian escalation for {task_id}",
+                "pave_board_name": config.PAVE_BOARD_NAME,
+                "staff_code": config.PAVE_STAFF_CODE,
+                "status": escalation_status,
+                "phase": phase,
+                "workflow_name": config.FACTORY_ARCHON_WORKFLOW_NAME,
+                "metadata": {"guardian_escalation": operations, "reason": reason},
+            },
+        )
+        run_id = run["id"]
+    else:
+        await api.patch(
+            f"/factory/worker/runs/{run_id}",
+            {
+                "status": escalation_status,
+                "phase": phase,
+                "failure_reason": reason,
+                "assigned_to_staff_code": guardian_staff_code if assigned else None,
+                "set_suspended": suspended,
+                "metadata": {"guardian_escalation": operations, "reason": reason},
+            },
+        )
+    await api.patch(
+        f"/factory/worker/runs/{run_id}",
+        {
+            "assigned_to_staff_code": guardian_staff_code if assigned else None,
+            "set_suspended": suspended,
+            "metadata": {"guardian_escalation": operations, "reason": reason},
+        },
+    )
+
+    await api.post(
+        f"/factory/worker/runs/{run_id}/events",
+        {
+            "instance_id": api.instance_id,
+            "level": "warning" if assigned else "error",
+            "phase": phase,
+            "message": (
+                f"Task suspended and assigned to guardian {guardian_staff_code}."
+                if assigned and suspended
+                else f"Task assigned to guardian {guardian_staff_code}, but suspend did not complete."
+                if assigned
+                else f"Guardian escalation to {guardian_staff_code} failed."
+            ),
+            "payload": {"task_id": task_id, "reason": reason, "operations": operations},
+        },
+    )
+    await api.post(
+        f"/factory/worker/runs/{run_id}/artifacts",
+        {
+            "category": "Audit",
+            "name": "Guardian escalation",
+            "status": "created" if assigned and suspended else escalation_status,
+            "content_type": "application/json",
+            "summary": reason,
+            "payload": {"task_id": task_id, "guardian_staff_code": guardian_staff_code, **operations},
+        },
+    )
+    return {
+        "run_id": run_id,
+        "task_id": task_id,
+        "assigned": assigned,
+        "suspended": suspended,
+        "operations": operations,
+    }
+
+
+async def upload_evidence_report(
+    api: FactoryApi, *, run_id: str, job_number: str, doc_type: str = "INT"
+) -> dict[str, Any]:
+    report = await api.get_text(f"/factory/worker/runs/{run_id}/evidence-report")
+    evidence_path = _run_artifacts_dir(run_id) / f"dark-factory-evidence-{run_id}.md"
+    evidence_path.write_text(report, encoding="utf-8")
+    edi = EdiCli()
+    try:
+        output = edi.upload_file(
+            job_number,
+            str(evidence_path),
+            doc_type=doc_type,
+            description=f"Dark Factory evidence report {run_id}",
+        )
+        status = "uploaded"
+        error = None
+    except EdiCliError as exc:
+        output = ""
+        status = "failed"
+        error = str(exc)
+    await api.post(
+        f"/factory/worker/runs/{run_id}/edoc-uploads",
+        {
+            "pave_job_id": job_number,
+            "status": status,
+            "file_name": evidence_path.name,
+            "full_log_included": True,
+            "critic_output_included": True,
+            "error_message": error,
+        },
+    )
+    await api.patch(
+        f"/factory/worker/runs/{run_id}",
+        {
+            "e_doc_status": status,
+            "e_doc_report_id": output if status == "uploaded" else None,
+            "metadata": {
+                "evidence_report_path": str(evidence_path),
+                "evidence_upload_output": output,
+                "evidence_upload_error": error,
+            },
+        },
+    )
+    await api.post(
+        f"/factory/worker/runs/{run_id}/events",
+        {
+            "instance_id": api.instance_id,
+            "level": "info" if status == "uploaded" else "error",
+            "phase": "evidence_upload",
+            "message": (
+                f"Evidence report uploaded to {job_number} eDoc."
+                if status == "uploaded"
+                else f"Evidence report upload to {job_number} eDoc failed."
+            ),
+            "payload": {
+                "job_number": job_number,
+                "file_path": str(evidence_path),
+                "status": status,
+                "output": output,
+                "error": error,
+            },
+        },
+    )
+    return {
+        "run_id": run_id,
+        "job_number": job_number,
+        "status": status,
+        "file_path": str(evidence_path),
+        "output": output,
+        "error": error,
+    }
+
+
+async def scout_once(
+    api: FactoryApi, *, board_name: str, staff_code: str, guardian_staff_code: str
+) -> None:
+    await register_instance(
+        api, board_name=board_name, staff_code=staff_code, guardian_staff_code=guardian_staff_code
+    )
+    readiness = await report_readiness(api, staff_code=staff_code)
     await report_tooling(api)
+    await process_tooling_update_jobs(api)
 
     stalled = [item for item in readiness if item.status != "ready"]
     cycle = await api.post(
@@ -386,6 +866,9 @@ async def scout_once(api: FactoryApi, *, board_name: str, staff_code: str) -> No
             "token_estimate": 0,
             "input_snapshot": {
                 "required_mcps": list(REQUIRED_MCPS),
+                "execution_staff_code": staff_code,
+                "guardian_staff_code": guardian_staff_code,
+                "dry_run": config.FACTORY_SCOUT_DRY_RUN,
                 "readiness": [item.__dict__ for item in readiness],
             },
         },
@@ -414,10 +897,11 @@ async def scout_once(api: FactoryApi, *, board_name: str, staff_code: str) -> No
                 "staff_code": staff_code,
                 "status": "stalled",
                 "phase": "mcp_readiness",
-                "workflow_name": "pave-dark-factory-execute-task",
+                "workflow_name": config.FACTORY_ARCHON_WORKFLOW_NAME,
                 "metadata": {
                     "no_pave_mutation": True,
                     "reason": "required MCP unavailable",
+                    "guardian_staff_code": guardian_staff_code,
                 },
             },
         )
@@ -542,28 +1026,6 @@ async def scout_once(api: FactoryApi, *, board_name: str, staff_code: str) -> No
         },
     )
 
-    run_status = "queued" if config.FACTORY_SCOUT_DRY_RUN else "claimed"
-    run_phase = "scout_handoff" if config.FACTORY_SCOUT_DRY_RUN else "claimed_started"
-    lifecycle_output = ""
-    if not config.FACTORY_SCOUT_DRY_RUN:
-        fresh_tasks = edi.list_staff_tasks(
-            staff_code,
-            include_capability_pool=config.FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL,
-        )
-        fresh_playing = find_playing_tasks(fresh_tasks)
-        if fresh_playing:
-            await api.patch(
-                f"/factory/worker/scout-cycles/{cycle['id']}",
-                {
-                    "status": "blocked",
-                    "decision": "playing_task_appeared_before_start",
-                    "summary": "A playing task appeared before claim/start; PAVE mutation skipped.",
-                    "output_snapshot": {"playing_tasks": [task.raw for task in fresh_playing]},
-                },
-            )
-            return
-        lifecycle_output = edi.start_task(resolved.task_id)
-
     run = await api.post(
         "/factory/worker/runs",
         {
@@ -574,44 +1036,57 @@ async def scout_once(api: FactoryApi, *, board_name: str, staff_code: str) -> No
             "pave_task_title": f"{candidate.job_number} / {candidate.task_type}: {candidate.description}",
             "pave_board_name": board_name,
             "staff_code": staff_code,
-            "status": run_status,
-            "phase": run_phase,
+            "status": "queued",
+            "phase": "scout_handoff",
             "workflow_id": resolved.workflow_id,
-            "workflow_name": "pave-dark-factory-execute-task",
+            "workflow_name": config.FACTORY_ARCHON_WORKFLOW_NAME,
             "metadata": {
                 "dry_run": config.FACTORY_SCOUT_DRY_RUN,
                 "candidate": candidate.raw,
                 "resolved_task": resolved.raw,
-                "lifecycle_output": lifecycle_output,
+                "guardian_staff_code": guardian_staff_code,
             },
         },
     )
-    if not config.FACTORY_SCOUT_DRY_RUN:
-        await api.patch(
-            f"/factory/worker/runs/{run['id']}",
-            {
-                "set_claim_attempted": True,
-                "set_claimed": True,
-                "set_started": True,
-                "metadata": {"lifecycle_output": lifecycle_output},
-            },
-        )
+    handoff = {
+        "run_id": run["id"],
+        "instance_id": api.instance_id,
+        "board_name": board_name,
+        "execution_staff_code": staff_code,
+        "guardian_staff_code": guardian_staff_code,
+        "workflow_name": config.FACTORY_ARCHON_WORKFLOW_NAME,
+        "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+        "candidate": candidate.raw,
+        "resolved_task": {
+            "task_id": resolved.task_id,
+            "workflow_id": resolved.workflow_id,
+            "task": resolved.raw,
+        },
+        "policy": {
+            "pave_is_source_of_truth": True,
+            "play_guard_rechecked_before_start": True,
+            "escalate_to_guardian_on_clarity_or_failure": True,
+            "quality_iteration_mcp_unavailable_action": "suspend_and_assign_guardian",
+        },
+    }
+    handoff_path = _write_json_artifact(run["id"], "pave-task-handoff.json", handoff)
     await api.post(
         f"/factory/worker/runs/{run['id']}/events",
         {
             "instance_id": api.instance_id,
             "level": "info",
-            "phase": run_phase,
+            "phase": "scout_handoff",
             "message": (
                 "Scout selected a startable PAVE task in dry-run mode."
                 if config.FACTORY_SCOUT_DRY_RUN
-                else "Scout claimed and started the selected PAVE task through edi CLI."
+                else "Scout selected a startable PAVE task and prepared live handoff."
             ),
             "payload": {
                 "dry_run": config.FACTORY_SCOUT_DRY_RUN,
                 "candidate": candidate.raw,
                 "resolved_task_id": resolved.task_id,
                 "workflow_id": resolved.workflow_id,
+                "handoff_path": str(handoff_path),
             },
         },
     )
@@ -627,17 +1102,251 @@ async def scout_once(api: FactoryApi, *, board_name: str, staff_code: str) -> No
                 "candidate": candidate.raw,
                 "resolved_task_id": resolved.task_id,
                 "workflow_id": resolved.workflow_id,
+                "guardian_staff_code": guardian_staff_code,
+                "handoff_path": str(handoff_path),
                 "dry_run": config.FACTORY_SCOUT_DRY_RUN,
             },
         },
     )
 
+    if config.FACTORY_SCOUT_DRY_RUN:
+        return
 
-async def run_loop(api: FactoryApi, *, board_name: str, staff_code: str, once: bool) -> None:
+    if not config.FACTORY_ARCHON_EXECUTE:
+        summary = "FACTORY_ARCHON_EXECUTE=false; live PAVE mutation skipped."
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "stalled",
+                "decision": "archon_dispatch_disabled",
+                "summary": summary,
+                "output_snapshot": {"candidate": candidate.raw, "handoff_path": str(handoff_path)},
+            },
+        )
+        await api.patch(
+            f"/factory/worker/runs/{run['id']}",
+            {
+                "status": "stalled",
+                "phase": "archon_dispatch_disabled",
+                "failure_reason": summary,
+                "metadata": {"no_pave_mutation": True, "handoff_path": str(handoff_path)},
+            },
+        )
+        await api.post(
+            f"/factory/worker/runs/{run['id']}/events",
+            {
+                "instance_id": api.instance_id,
+                "level": "warning",
+                "phase": "archon_dispatch_disabled",
+                "message": summary,
+                "payload": {"no_pave_mutation": True},
+            },
+        )
+        return
+
+    if not shutil.which("archon"):
+        summary = "archon executable not found; live PAVE mutation skipped."
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "stalled",
+                "decision": "archon_missing",
+                "summary": summary,
+                "output_snapshot": {"candidate": candidate.raw},
+            },
+        )
+        await api.patch(
+            f"/factory/worker/runs/{run['id']}",
+            {
+                "status": "stalled",
+                "phase": "archon_missing",
+                "failure_reason": summary,
+                "metadata": {"no_pave_mutation": True},
+            },
+        )
+        return
+
+    mutation_check = _staff_mutation_check(staff_code)
+    if not mutation_check.allowed:
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "stalled",
+                "decision": "oauth_staff_mismatch",
+                "summary": mutation_check.detail,
+                "output_snapshot": mutation_check.metadata,
+            },
+        )
+        await api.patch(
+            f"/factory/worker/runs/{run['id']}",
+            {
+                "status": "stalled",
+                "phase": "oauth_staff_mismatch",
+                "failure_reason": mutation_check.detail,
+                "metadata": {"no_pave_mutation": True, **mutation_check.metadata},
+            },
+        )
+        await api.post(
+            f"/factory/worker/runs/{run['id']}/events",
+            {
+                "instance_id": api.instance_id,
+                "level": "warning",
+                "phase": "oauth_staff_mismatch",
+                "message": mutation_check.detail,
+                "payload": mutation_check.metadata,
+            },
+        )
+        return
+
+    fresh_tasks = edi.list_staff_tasks(
+        staff_code,
+        include_capability_pool=config.FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL,
+    )
+    fresh_playing = find_playing_tasks(fresh_tasks)
+    if fresh_playing:
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "blocked",
+                "decision": "playing_task_appeared_before_start",
+                "summary": "A playing task appeared before claim/start; PAVE mutation skipped.",
+                "output_snapshot": {"playing_tasks": [task.raw for task in fresh_playing]},
+            },
+        )
+        await api.patch(
+            f"/factory/worker/runs/{run['id']}",
+            {
+                "status": "stalled",
+                "phase": "playing_task_guard",
+                "failure_reason": "A playing task appeared before claim/start; PAVE mutation skipped.",
+                "metadata": {"no_pave_mutation": True},
+            },
+        )
+        return
+
+    lifecycle_output = ""
+    await api.patch(
+        f"/factory/worker/runs/{run['id']}",
+        {
+            "status": "running",
+            "phase": "claim_start",
+            "set_claim_attempted": True,
+            "metadata": {"mutation_check": mutation_check.metadata},
+        },
+    )
+    try:
+        lifecycle_output = edi.start_task(resolved.task_id)
+    except EdiCliError as exc:
+        reason = f"edi task start failed: {exc}"
+        await api.post(
+            f"/factory/worker/runs/{run['id']}/events",
+            {
+                "instance_id": api.instance_id,
+                "level": "error",
+                "phase": "claim_start",
+                "message": reason,
+                "payload": {"task_id": resolved.task_id},
+            },
+        )
+        await escalate_task_to_guardian(
+            api,
+            task_id=resolved.task_id,
+            guardian_staff_code=guardian_staff_code,
+            reason=reason,
+            run_id=run["id"],
+            job_number=candidate.job_number,
+            phase="claim_start_failed",
+        )
+        return
+
+    await api.patch(
+        f"/factory/worker/runs/{run['id']}",
+        {
+            "status": "claimed",
+            "phase": "claimed_started",
+            "set_claimed": True,
+            "set_started": True,
+            "metadata": {"lifecycle_output": lifecycle_output},
+        },
+    )
+    await api.post(
+        f"/factory/worker/runs/{run['id']}/events",
+        {
+            "instance_id": api.instance_id,
+            "level": "info",
+            "phase": "claimed_started",
+            "message": "Scout claimed and started the selected PAVE task through edi CLI.",
+            "payload": {"lifecycle_output": lifecycle_output, "task_id": resolved.task_id},
+        },
+    )
+
+    dispatch = _dispatch_archon_workflow(run["id"], handoff)
+    await api.post(
+        f"/factory/worker/runs/{run['id']}/artifacts",
+        {
+            "category": "Coding",
+            "name": "Archon workflow dispatch",
+            "status": dispatch.status,
+            "content_type": "application/json",
+            "summary": dispatch.detail,
+            "payload": {
+                "command": dispatch.command,
+                "handoff_path": dispatch.handoff_path,
+                "stdout": dispatch.stdout,
+                "stderr": dispatch.stderr,
+            },
+        },
+    )
+    if dispatch.status != "running":
+        await escalate_task_to_guardian(
+            api,
+            task_id=resolved.task_id,
+            guardian_staff_code=guardian_staff_code,
+            reason=dispatch.detail,
+            run_id=run["id"],
+            job_number=candidate.job_number,
+            phase="archon_dispatch_failed",
+        )
+        return
+    await api.patch(
+        f"/factory/worker/runs/{run['id']}",
+        {
+            "status": "running",
+            "phase": "archon_dispatched",
+            "metadata": {
+                "archon_dispatch": {
+                    "command": dispatch.command,
+                    "handoff_path": dispatch.handoff_path,
+                    "stdout": dispatch.stdout,
+                    "stderr": dispatch.stderr,
+                }
+            },
+        },
+    )
+    await api.post(
+        f"/factory/worker/runs/{run['id']}/events",
+        {
+            "instance_id": api.instance_id,
+            "level": "info",
+            "phase": "archon_dispatched",
+            "message": "Archon workflow dispatched for the claimed PAVE task.",
+            "payload": {"handoff_path": dispatch.handoff_path, "stdout": dispatch.stdout},
+        },
+    )
+
+
+async def run_loop(
+    api: FactoryApi, *, board_name: str, staff_code: str, guardian_staff_code: str, once: bool
+) -> None:
     await wait_for_backend(api)
     while True:
         try:
-            await scout_once(api, board_name=board_name, staff_code=staff_code)
+            await scout_once(
+                api,
+                board_name=board_name,
+                staff_code=staff_code,
+                guardian_staff_code=guardian_staff_code,
+            )
         except Exception as exc:
             print(f"factory scout iteration failed: {exc}", file=sys.stderr)
         if once:
@@ -651,12 +1360,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--instance-id", default=config.FACTORY_INSTANCE_ID or f"factory-{uuid.uuid4()}")
     parser.add_argument("--board-name", default=config.PAVE_BOARD_NAME)
     parser.add_argument("--staff-code", default=config.PAVE_STAFF_CODE)
+    parser.add_argument("--guardian-staff-code", default=config.PAVE_GUARDIAN_STAFF_CODE)
     parser.add_argument("--once", action="store_true", help="Run one scout cycle and exit.")
     parser.add_argument(
         "--check-tooling",
         action="store_true",
         help="Only register tooling inventory and exit.",
     )
+    parser.add_argument("--escalate-task-id", help="Suspend/assign one task to the guardian and exit.")
+    parser.add_argument(
+        "--escalation-reason",
+        default="Dark Factory manual escalation",
+        help="Reason written to the task notes and dashboard when escalating.",
+    )
+    parser.add_argument("--escalation-job-number", help="Optional WI/CS/PRJ number for the escalation.")
+    parser.add_argument("--upload-evidence-run-id", help="Upload a run evidence report to eDoc and exit.")
+    parser.add_argument("--upload-evidence-job-number", help="WI/CS/PRJ number for eDoc upload.")
     return parser.parse_args()
 
 
@@ -667,12 +1386,42 @@ async def main() -> None:
         raise RuntimeError("FACTORY_WORKER_TOKEN must be set for the worker")
     api = FactoryApi(args.api_base, token, args.instance_id)
     await wait_for_backend(api)
-    await register_instance(api, board_name=args.board_name, staff_code=args.staff_code)
+    await register_instance(
+        api,
+        board_name=args.board_name,
+        staff_code=args.staff_code,
+        guardian_staff_code=args.guardian_staff_code,
+    )
     if args.check_tooling:
-        await report_readiness(api)
+        await report_readiness(api, staff_code=args.staff_code)
         await report_tooling(api)
+        await process_tooling_update_jobs(api)
         return
-    await run_loop(api, board_name=args.board_name, staff_code=args.staff_code, once=args.once)
+    if args.escalate_task_id:
+        await escalate_task_to_guardian(
+            api,
+            task_id=args.escalate_task_id,
+            guardian_staff_code=args.guardian_staff_code,
+            reason=args.escalation_reason,
+            job_number=args.escalation_job_number,
+        )
+        return
+    if args.upload_evidence_run_id:
+        if not args.upload_evidence_job_number:
+            raise RuntimeError("--upload-evidence-job-number is required with --upload-evidence-run-id")
+        await upload_evidence_report(
+            api,
+            run_id=args.upload_evidence_run_id,
+            job_number=args.upload_evidence_job_number,
+        )
+        return
+    await run_loop(
+        api,
+        board_name=args.board_name,
+        staff_code=args.staff_code,
+        guardian_staff_code=args.guardian_staff_code,
+        once=args.once,
+    )
 
 
 if __name__ == "__main__":

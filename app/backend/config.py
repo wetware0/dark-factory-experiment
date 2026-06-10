@@ -204,7 +204,8 @@ FRONTEND_PORT: int = 5173
 # PAVE factory orchestration. These defaults are deliberately local-dev
 # friendly; production should set FACTORY_WORKER_TOKEN to a long random value.
 PAVE_BOARD_NAME: str = os.environ.get("PAVE_BOARD_NAME", "Peter's Board")
-PAVE_STAFF_CODE: str = os.environ.get("PAVE_STAFF_CODE", "PWS")
+PAVE_STAFF_CODE: str = os.environ.get("PAVE_STAFF_CODE", "C50")
+PAVE_GUARDIAN_STAFF_CODE: str = os.environ.get("PAVE_GUARDIAN_STAFF_CODE", "PWS")
 FACTORY_INSTANCE_ID: str = os.environ.get("FACTORY_INSTANCE_ID", "")
 FACTORY_WORKER_TOKEN: str = os.environ.get("FACTORY_WORKER_TOKEN", "")
 FACTORY_STORAGE_PROVIDER: str = os.environ.get("FACTORY_STORAGE_PROVIDER", "sqlserver").strip().lower()
@@ -220,6 +221,24 @@ FACTORY_SCOUT_DRY_RUN: bool = os.environ.get("FACTORY_SCOUT_DRY_RUN", "true").st
     "true",
     "yes",
     "on",
+)
+FACTORY_ALLOW_OAUTH_STAFF_MISMATCH: bool = (
+    os.environ.get("FACTORY_ALLOW_OAUTH_STAFF_MISMATCH", "false").strip().lower()
+    in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+)
+FACTORY_ARCHON_EXECUTE: bool = os.environ.get("FACTORY_ARCHON_EXECUTE", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+FACTORY_ARCHON_WORKFLOW_NAME: str = os.environ.get(
+    "FACTORY_ARCHON_WORKFLOW_NAME", "pave-dark-factory-execute-task"
 )
 FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL: bool = (
     os.environ.get("FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL", "true").strip().lower()

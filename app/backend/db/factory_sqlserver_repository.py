@@ -1498,6 +1498,49 @@ async def list_tooling_update_jobs(limit: int = 50) -> list[dict[str, Any]]:
     )
 
 
+async def update_tooling_update_job(
+    job_id: str,
+    *,
+    status: str | None = None,
+    log_entry: dict[str, Any] | None = None,
+    error_message: str | None = None,
+    set_started: bool = False,
+    set_finished: bool = False,
+) -> dict[str, Any] | None:
+    def _sync(conn: pyodbc.Connection) -> dict[str, Any] | None:
+        existing = _fetch_one(
+            conn,
+            "SELECT log FROM dbo.factory_tooling_update_jobs WHERE id = ?",
+            job_id,
+        )
+        if existing is None:
+            return None
+        log = existing.get("log") or []
+        if log_entry is not None:
+            log.append(log_entry)
+        _execute(
+            conn,
+            """
+            UPDATE dbo.factory_tooling_update_jobs
+            SET status = COALESCE(?, status),
+                started_at = CASE WHEN ? = 1 THEN SYSDATETIMEOFFSET() ELSE started_at END,
+                finished_at = CASE WHEN ? = 1 THEN SYSDATETIMEOFFSET() ELSE finished_at END,
+                log = ?,
+                error_message = COALESCE(?, error_message)
+            WHERE id = ?
+            """,
+            status,
+            1 if set_started else 0,
+            1 if set_finished else 0,
+            _to_json(log),
+            error_message,
+            job_id,
+        )
+        return _fetch_one(conn, "SELECT * FROM dbo.factory_tooling_update_jobs WHERE id = ?", job_id)
+
+    return await _run(_sync)
+
+
 async def add_audit_entry(
     *,
     actor_type: str,

@@ -6,8 +6,9 @@ description: |
   has no other playing task. The workflow must claim/start exactly one PAVE
   task, use wtgkb and sbkb for task knowledge, support multiple CargoWise
   repositories, run critic as a DAG node, upload the full dashboard/evidence
-  report to eDoc, and either close the PAVE task or suspend and assign it back
-  to the configured staff code when close is unavailable.
+  report to eDoc, and either close the PAVE task or suspend and assign it to
+  the guardian staff code when close is unavailable. For this instance C50 is
+  the execution staff code and PWS is the guardian.
 
 provider: claude
 model: sonnet
