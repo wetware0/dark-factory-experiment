@@ -5,6 +5,7 @@ import { Sidebar } from './components/Sidebar';
 import { ToastProvider } from './components/ToastProvider';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { AdminVideos } from './pages/AdminVideos';
+import { FactoryDashboard } from './pages/FactoryDashboard';
 import { Login } from './pages/Login';
 import { NotFound } from './pages/NotFound';
 import { Signup } from './pages/Signup';
@@ -123,6 +124,14 @@ function App() {
               element={
                 <RequireAuth>
                   <AdminVideos />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/factory"
+              element={
+                <RequireAuth>
+                  <FactoryDashboard />
                 </RequireAuth>
               }
             />

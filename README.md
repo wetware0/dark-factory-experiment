@@ -8,6 +8,23 @@ The application itself is a dark-mode AI chat app that lets you have grounded co
 
 ---
 
+## PAVE Factory Services
+
+This branch adds a PAVE-driven control path alongside the original GitHub-driven experiment. Use the local service controller to run the backend, frontend, and scout worker:
+
+```powershell
+.\scripts\factory-services.ps1 start
+.\scripts\factory-services.ps1 status
+.\scripts\factory-services.ps1 stop
+.\scripts\factory-services.ps1 restart
+```
+
+The dashboard is served by the Vite app at `http://127.0.0.1:5173/factory`. The script creates a worker token at `.factory/factory-worker-token.txt`, stores service PIDs in `.factory/pids`, and writes logs in `.factory/logs`.
+
+The default PAVE board is `Peter's Board` and the default staff code is `PWS`. Override them with script parameters when running another pool.
+
+---
+
 ## The Dark Factory
 
 The term "Dark Factory" comes from Dan Shapiro (Glowforge), inspired by FANUC's 1980s lights-out robotics plants where robots built robots 24/7 with no humans on the floor. Applied to software: **specs go in, software comes out.**

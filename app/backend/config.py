@@ -201,6 +201,17 @@ FRONTEND_DIST: str = os.environ.get("FRONTEND_DIST", "")
 BACKEND_PORT: int = 8000
 FRONTEND_PORT: int = 5173
 
+# PAVE factory orchestration. These defaults are deliberately local-dev
+# friendly; production should set FACTORY_WORKER_TOKEN to a long random value.
+PAVE_BOARD_NAME: str = os.environ.get("PAVE_BOARD_NAME", "Peter's Board")
+PAVE_STAFF_CODE: str = os.environ.get("PAVE_STAFF_CODE", "PWS")
+FACTORY_INSTANCE_ID: str = os.environ.get("FACTORY_INSTANCE_ID", "")
+FACTORY_WORKER_TOKEN: str = os.environ.get("FACTORY_WORKER_TOKEN", "")
+FACTORY_SCOUT_INTERVAL_SECONDS: int = int(
+    os.environ.get("FACTORY_SCOUT_INTERVAL_SECONDS", "60")
+)
+FACTORY_LOCAL_SCOUT_MODEL: str = os.environ.get("FACTORY_LOCAL_SCOUT_MODEL", "local-scout")
+
 # CORS — comma-separated list of allowed origins; defaults to localhost + 127.0.0.1
 # on the configured FRONTEND_PORT so the default dev setup works without any env vars.
 _cors_raw: str = os.environ.get(
