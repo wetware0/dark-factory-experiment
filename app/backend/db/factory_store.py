@@ -21,8 +21,12 @@ def _impl() -> ModuleType:
         from backend.db import factory_repository
 
         return factory_repository
+    if provider in {"sqlite", "sqlite3"}:
+        from backend.db import factory_sqlite_repository
+
+        return factory_sqlite_repository
     raise RuntimeError(
-        "Unsupported FACTORY_STORAGE_PROVIDER. Use 'sqlserver' or 'postgres'. "
+        "Unsupported FACTORY_STORAGE_PROVIDER. Use 'sqlserver', 'postgres', or 'sqlite'. "
         f"Got {provider!r}."
     )
 

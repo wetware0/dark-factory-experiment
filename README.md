@@ -96,6 +96,22 @@ $env:FACTORY_SQLSERVER_CONNECTION_STRING = "Driver={ODBC Driver 18 for SQL Serve
 
 The SQL Server repository creates factory tables idempotently and stores JSON-shaped fields as `NVARCHAR(MAX)` payloads.
 
+For Peter's local RYZEN2 SQL Server, use an ODBC connection string shaped like this after creating/selecting the target database:
+
+```powershell
+$env:FACTORY_STORAGE_PROVIDER = "sqlserver"
+$env:FACTORY_SQLSERVER_CONNECTION_STRING = "Driver={ODBC Driver 18 for SQL Server};Server=RYZEN2;Database=DarkFactory;Trusted_Connection=yes;Encrypt=yes;TrustServerCertificate=yes;Application Name=Dark Factory;"
+```
+
+For isolated local smoke tests, the factory portal can use SQLite:
+
+```powershell
+$env:FACTORY_STORAGE_PROVIDER = "sqlite"
+$env:FACTORY_SQLITE_PATH = ".factory/factory.sqlite3"
+```
+
+SQLite is a local test provider only. It is not the multi-instance coordination store for a running dark-factory pool.
+
 The inherited chat/RAG scaffold still requires its original `DATABASE_URL` Postgres/pgvector database. Migrating that legacy retrieval code to SQL Server is a separate task because it depends on Postgres full-text search and pgvector.
 
 ---

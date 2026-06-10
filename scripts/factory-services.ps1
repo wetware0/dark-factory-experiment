@@ -75,6 +75,9 @@ function Test-FactoryStorageConfigured {
     if ($provider -in @("postgres", "postgresql")) {
         return [bool] (Get-ConfiguredValue "DATABASE_URL")
     }
+    if ($provider -in @("sqlite", "sqlite3")) {
+        return $true
+    }
     return $false
 }
 
