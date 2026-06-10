@@ -207,6 +207,10 @@ PAVE_BOARD_NAME: str = os.environ.get("PAVE_BOARD_NAME", "Peter's Board")
 PAVE_STAFF_CODE: str = os.environ.get("PAVE_STAFF_CODE", "PWS")
 FACTORY_INSTANCE_ID: str = os.environ.get("FACTORY_INSTANCE_ID", "")
 FACTORY_WORKER_TOKEN: str = os.environ.get("FACTORY_WORKER_TOKEN", "")
+FACTORY_STORAGE_PROVIDER: str = os.environ.get("FACTORY_STORAGE_PROVIDER", "sqlserver").strip().lower()
+FACTORY_SQLSERVER_CONNECTION_STRING: str = os.environ.get(
+    "FACTORY_SQLSERVER_CONNECTION_STRING", ""
+)
 FACTORY_SCOUT_INTERVAL_SECONDS: int = int(
     os.environ.get("FACTORY_SCOUT_INTERVAL_SECONDS", "60")
 )

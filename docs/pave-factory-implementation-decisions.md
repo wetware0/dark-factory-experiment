@@ -26,6 +26,15 @@ This log records the assumptions, decisions, and operational constraints used wh
 - Therefore, implementation must not pretend to claim, start, close, suspend, assign, or upload eDoc evidence until a concrete MCP or CLI adapter is available at runtime.
 - The system fails closed by pausing scout/agent work when required MCPs are stale, unauthenticated, or unavailable, and the dashboard visualizes the stalled state.
 
+## Database Decision
+
+- Factory portal state should use SQL Server by default because SQL Server is the standard WTG operational database.
+- Runtime selector: `FACTORY_STORAGE_PROVIDER=sqlserver`.
+- Required SQL Server setting: `FACTORY_SQLSERVER_CONNECTION_STRING`.
+- The SQL Server repository creates factory tables idempotently on first use and stores JSON-shaped fields as `NVARCHAR(MAX)` payloads.
+- The existing DynaChat chat/RAG application was already Postgres/pgvector-backed before the PAVE factory work. That storage remains separate in this PR because replacing pgvector and Postgres full-text retrieval with SQL Server equivalents is a broader migration.
+- A Postgres factory repository and migration remain available as a compatibility path, but they are not the preferred WTG deployment target.
+
 ## PAVE Lifecycle Policy
 
 - PAVE remains the driving single source of truth.

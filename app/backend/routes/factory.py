@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from backend import config
 from backend.auth.dependencies import get_current_admin
-from backend.db import factory_repository as repo
+from backend.db import factory_store as repo
 
 router = APIRouter(prefix="/factory", tags=["factory"])
 

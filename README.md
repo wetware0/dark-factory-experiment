@@ -23,6 +23,15 @@ The dashboard is served by the Vite app at `http://127.0.0.1:5173/factory`. The 
 
 The default PAVE board is `Peter's Board` and the default staff code is `PWS`. Override them with script parameters when running another pool.
 
+Factory portal state defaults to SQL Server:
+
+```powershell
+$env:FACTORY_STORAGE_PROVIDER = "sqlserver"
+$env:FACTORY_SQLSERVER_CONNECTION_STRING = "Driver={ODBC Driver 18 for SQL Server};Server=YOURSERVER;Database=DarkFactory;Trusted_Connection=yes;TrustServerCertificate=yes;"
+```
+
+The pre-existing chat/RAG app still uses its original `DATABASE_URL` Postgres/pgvector database. A full chat/RAG migration to SQL Server is a separate change because retrieval depends on Postgres full-text search and pgvector.
+
 ---
 
 ## The Dark Factory

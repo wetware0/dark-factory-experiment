@@ -40,9 +40,10 @@ function Get-LogPath([string] $Name) {
     return Join-Path $LogDir "$Name.log"
 }
 
-function Test-DatabaseConfigured {
-    if ($env:DATABASE_URL) {
-        return $true
+function Get-ConfiguredValue([string] $Name, [string] $Default = "") {
+    $envValue = [Environment]::GetEnvironmentVariable($Name)
+    if ($envValue) {
+        return $envValue
     }
     foreach ($candidate in @(
         (Join-Path $RepoRoot ".env"),
@@ -50,11 +51,26 @@ function Test-DatabaseConfigured {
         (Join-Path $RepoRoot "app/backend/.env")
     )) {
         if (Test-Path -LiteralPath $candidate) {
-            $match = Select-String -LiteralPath $candidate -Pattern "^\s*DATABASE_URL\s*=" -Quiet
+            $match = Select-String -LiteralPath $candidate -Pattern "^\s*$Name\s*=\s*(.*)\s*$" | Select-Object -First 1
             if ($match) {
-                return $true
+                return ($match.Matches[0].Groups[1].Value).Trim().Trim('"').Trim("'")
             }
         }
+    }
+    return $Default
+}
+
+function Test-DatabaseConfigured {
+    return [bool] (Get-ConfiguredValue "DATABASE_URL")
+}
+
+function Test-FactoryStorageConfigured {
+    $provider = (Get-ConfiguredValue "FACTORY_STORAGE_PROVIDER" "sqlserver").ToLowerInvariant()
+    if ($provider -in @("sqlserver", "mssql", "sql_server")) {
+        return [bool] (Get-ConfiguredValue "FACTORY_SQLSERVER_CONNECTION_STRING")
+    }
+    if ($provider -in @("postgres", "postgresql")) {
+        return [bool] (Get-ConfiguredValue "DATABASE_URL")
     }
     return $false
 }
@@ -162,7 +178,10 @@ function Show-FactoryStatus {
 
 function Start-Factory {
     if (-not (Test-DatabaseConfigured)) {
-        throw "DATABASE_URL is not configured. Set it in the environment or in .env before starting factory services."
+        throw "DATABASE_URL is not configured. The existing DynaChat backend still requires it before starting services."
+    }
+    if (-not (Test-FactoryStorageConfigured)) {
+        throw "Factory storage is not configured. Set FACTORY_SQLSERVER_CONNECTION_STRING for SQL Server or FACTORY_STORAGE_PROVIDER=postgres with DATABASE_URL."
     }
 
     $appDir = Join-Path $RepoRoot "app"

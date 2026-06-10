@@ -27,8 +27,10 @@ Implemented in this branch:
 
 - Fork/branch target: `wetware0/dark-factory-experiment`, branch `codex/pave-dark-factory-wetware0`.
 - Durable assumptions and decisions log: `docs/pave-factory-implementation-decisions.md`.
-- Portal database schema: `app/backend/alembic/versions/0006_pave_factory_portal.py`.
-- Factory repository/API layer: `app/backend/db/factory_repository.py`, `app/backend/routes/factory.py`, registered in `app/backend/main.py`.
+- Factory portal storage selector: `app/backend/db/factory_store.py`.
+- Preferred WTG factory portal database: SQL Server through `app/backend/db/factory_sqlserver_repository.py`.
+- Compatibility factory portal database: Postgres through `app/backend/alembic/versions/0006_pave_factory_portal.py` and `app/backend/db/factory_repository.py`.
+- Factory API layer: `app/backend/routes/factory.py`, registered in `app/backend/main.py`.
 - Scout worker CLI: `app/backend/factory/worker.py`.
 - Local service control: `scripts/factory-services.ps1`.
 - Dashboard route: `/factory`, implemented in `app/frontend/src/pages/FactoryDashboard.tsx` and `app/frontend/src/lib/api.ts`.
@@ -53,6 +55,15 @@ Local service commands:
 ```
 
 The service script starts the backend, frontend, and scout worker, creates `.factory/factory-worker-token.txt` when needed, stores PID files under `.factory/pids`, and writes logs under `.factory/logs`. The dashboard is available at `http://127.0.0.1:5173/factory` when services start successfully.
+
+Factory portal storage now defaults to SQL Server:
+
+```powershell
+FACTORY_STORAGE_PROVIDER=sqlserver
+FACTORY_SQLSERVER_CONNECTION_STRING="Driver={ODBC Driver 18 for SQL Server};Server=YOURSERVER;Database=DarkFactory;Trusted_Connection=yes;TrustServerCertificate=yes;"
+```
+
+The existing DynaChat chat/RAG app still requires its existing `DATABASE_URL` Postgres/pgvector database. Migrating the chat/RAG side to SQL Server is deliberately separate because retrieval currently depends on Postgres full-text search and pgvector.
 
 ## Inputs Reviewed
 
@@ -1115,7 +1126,9 @@ The current app is DynaChat-specific. If this portal will become a separate inte
 
 ### Data Model
 
-Proposed Postgres tables:
+Implementation update: the preferred WTG deployment target for factory portal state is now SQL Server, not Postgres. The live schema is created idempotently by `app/backend/db/factory_sqlserver_repository.py` using SQL Server types such as `UNIQUEIDENTIFIER`, `DATETIMEOFFSET`, `BIT`, and JSON payloads stored in `NVARCHAR(MAX)`. The Postgres DDL below remains as the original conceptual schema and as a compatibility reference for `FACTORY_STORAGE_PROVIDER=postgres`; do not treat it as the preferred production target.
+
+Original proposed Postgres tables:
 
 ```sql
 CREATE TABLE factory_instances (
