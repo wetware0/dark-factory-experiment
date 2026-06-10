@@ -11,6 +11,14 @@ This log records the assumptions, decisions, and operational constraints used wh
 - Working branch: `codex/pave-dark-factory-wetware0`.
 - Remote used for the user's fork: `wetware0`.
 
+## Repository Identity Decision
+
+- The repository is now framed as the PAVE Dark Factory Worker for WiseTech Global CargoWise development tasks.
+- PAVE tasks, not GitHub issues or the inherited sample web app, define what the worker should do.
+- The central portal is the primary user-facing surface and is served at `/factory`.
+- The inherited DynaChat chat/RAG application remains available as legacy scaffold at `/chat`, `/c/:conversationId`, and `/admin` until a future PAVE cleanup task removes or separates it.
+- Governance files now describe PAVE/CargoWise worker behavior. Worker-authored runs still must not modify governance unless a human explicitly assigns a governance-update PAVE task.
+
 ## PAVE Operating Inputs
 
 - PAVE board name: `Peter's Board`.
@@ -32,7 +40,7 @@ This log records the assumptions, decisions, and operational constraints used wh
 - Runtime selector: `FACTORY_STORAGE_PROVIDER=sqlserver`.
 - Required SQL Server setting: `FACTORY_SQLSERVER_CONNECTION_STRING`.
 - The SQL Server repository creates factory tables idempotently on first use and stores JSON-shaped fields as `NVARCHAR(MAX)` payloads.
-- The existing DynaChat chat/RAG application was already Postgres/pgvector-backed before the PAVE factory work. That storage remains separate in this PR because replacing pgvector and Postgres full-text retrieval with SQL Server equivalents is a broader migration.
+- The inherited DynaChat chat/RAG application was already Postgres/pgvector-backed before the PAVE factory work. That storage remains separate in this PR because replacing pgvector and Postgres full-text retrieval with SQL Server equivalents is a broader migration.
 - A Postgres factory repository and migration remain available as a compatibility path, but they are not the preferred WTG deployment target.
 
 ## PAVE Lifecycle Policy

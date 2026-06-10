@@ -1,5 +1,5 @@
 /**
- * Typed fetch wrappers for the RAG YouTube Chat API.
+ * Typed fetch wrappers for the PAVE Dark Factory portal and inherited chat API.
  */
 
 const BASE = '/api';

@@ -8,7 +8,9 @@ This file covers **how the code is written**. For *what* to build, see `MISSION.
 
 ## Project Overview
 
-**DynaChat** is a RAG-powered chat interface that lets viewers query a single YouTube channel's content and get streaming answers with per-chunk citations that deep-link to the exact timestamp in the source video. FastAPI + Python backend, React + Vite + TypeScript frontend, SQLite for local dev (Postgres + pgvector already provisioned in production — see **Deployment** below).
+**PAVE Dark Factory Worker** is an agentic worker and control portal for WiseTech Global CargoWise development tasks. PAVE is the source of truth for work discovery, task lifecycle, work-item/incident status, and final evidence. The worker uses ediProd/PAVE, `wtgkb`, `sbkb`, Archon workflows, and CargoWise-specific skills to claim one authorized task, execute it across the required CargoWise repository set, and report artifacts back to PAVE.
+
+The inherited DynaChat RAG chat application still exists in this repository as scaffold and legacy harness code. Do not treat DynaChat as the repository mission for new work unless the PAVE task explicitly targets legacy cleanup or scaffold behavior.
 
 ---
 
@@ -18,7 +20,8 @@ This file covers **how the code is written**. For *what* to build, see `MISSION.
 - Python 3.11+ (not specified in any lockfile; don't rely on 3.12+ features)
 - `uv` for package management (not pip, not poetry) — `backend/pyproject.toml` is the dependency source of truth, `backend/uv.lock` pins exact versions
 - FastAPI with `uvicorn[standard]` ASGI server
-- `asyncpg` for async Postgres access (via connection pool from `db/postgres.py`)
+- `pyodbc` for SQL Server factory portal state when `FACTORY_STORAGE_PROVIDER=sqlserver`
+- `asyncpg` for inherited Postgres access and the compatibility factory repository
 - `alembic` for schema migrations (one Alembic migration layer for all tables)
 - `docling-core[chunking]` for transcript chunking (HybridChunker)
 - `openai` SDK pointed at OpenRouter's OpenAI-compatible endpoint (for both embeddings and chat completions)
@@ -39,7 +42,7 @@ This file covers **how the code is written**. For *what* to build, see `MISSION.
 ## Repo Layout
 
 ```
-rag-youtube-chat/
+pave-dark-factory-worker/
 ├── MISSION.md               # Product scope — factory reads this at triage
 ├── FACTORY_RULES.md         # Factory operational rules — every workflow reads this
 ├── CLAUDE.md                # This file — code conventions
@@ -53,12 +56,16 @@ rag-youtube-chat/
 │   │   ├── config.py        # All env var reads + hardcoded constants
 │   │   ├── pyproject.toml   # uv dependencies + tool config (ruff, mypy, pytest)
 │   │   ├── uv.lock          # uv lockfile (committed, pinned versions)
+│   │   ├── factory/
+│   │   │   └── worker.py    # PAVE scout worker entry point
 │   │   ├── data/
 │   │   │   ├── chat.db      # SQLite database (auto-created, gitignored)
 │   │   │   └── seed.py      # 10 mock videos seeded on first startup
 │   │   ├── db/
-│   │   │   ├── schema.py    # CREATE TABLE IF NOT EXISTS, PRAGMAs, init_db()
-│   │   │   └── repository.py # ALL raw SQL lives here — nowhere else
+│   │   │   ├── factory_store.py
+│   │   │   ├── factory_sqlserver_repository.py
+│   │   │   ├── factory_repository.py
+│   │   │   └── repository.py # inherited chat/RAG SQL
 │   │   ├── llm/
 │   │   │   └── openrouter.py # stream_chat() async generator, SSE-formatted output
 │   │   ├── rag/
@@ -68,6 +75,7 @@ rag-youtube-chat/
 │   │   │   ├── retriever.py    # NumPy cosine similarity top-k (legacy)
 │   │   │   └── retriever_hybrid.py  # RRF hybrid (tsvector + pgvector, replaces retriever.py for message retrieval)
 │   │   ├── routes/
+│   │   │   ├── factory.py       # /api/factory portal endpoints
 │   │   │   ├── channels.py      # POST /api/channels/sync, GET /api/channels/sync-runs
 │   │   │   ├── conversations.py # GET/POST/DELETE /api/conversations*, GET /api/videos
 │   │   │   ├── messages.py      # POST /api/conversations/{id}/messages (streaming SSE)
@@ -82,6 +90,7 @@ rag-youtube-chat/
 │       └── src/
 │           ├── main.tsx      # React root
 │           ├── App.tsx       # BrowserRouter + layout
+│           ├── pages/FactoryDashboard.tsx
 │           ├── components/   # ChatArea, Sidebar, Message, MarkdownRenderer, ChatInput, VideoExplorer, ToastProvider
 │           ├── hooks/        # useConversations, useMessages, useStreamingResponse, useToast
 │           ├── lib/
@@ -95,8 +104,9 @@ rag-youtube-chat/
 **Placement rules** (where new files go):
 
 - New API routes → new file in `app/backend/routes/`, one file per resource. Mount from `main.py`.
-- New SQL queries → `app/backend/db/repository.py` only. Never write SQL in route handlers, services, or components.
-- New schema changes → `app/backend/db/schema.py`. For the current SQLite phase, use `CREATE TABLE IF NOT EXISTS` with portable SQL. See "Database" section for the Postgres-portability rules you must follow *now*.
+- New factory SQL queries → the selected factory repository (`factory_sqlserver_repository.py` for SQL Server, `factory_repository.py` for Postgres compatibility). Never write SQL in route handlers, services, or components.
+- New inherited chat/RAG SQL queries → `app/backend/db/repository.py` only unless the PAVE task explicitly authorizes a migration.
+- New schema changes → prefer the factory repository's idempotent table setup for SQL Server state and Alembic migrations for Postgres compatibility.
 - New RAG pipeline steps → `app/backend/rag/`. Keep chunker, embeddings, and retriever as separate modules.
 - New React components → `app/frontend/src/components/`, one component per file, named exports matching filename.
 - New React hooks → `app/frontend/src/hooks/`, prefix with `use`.
@@ -105,6 +115,19 @@ rag-youtube-chat/
 ---
 
 ## Running the App
+
+Preferred factory service controller:
+
+```powershell
+.\scripts\factory-services.ps1 start
+.\scripts\factory-services.ps1 status
+.\scripts\factory-services.ps1 stop
+.\scripts\factory-services.ps1 restart
+```
+
+The primary portal route is `/factory`.
+
+Legacy scaffold start path:
 
 Install and start everything (backend venv + deps, frontend deps, both dev servers):
 
@@ -248,22 +271,22 @@ bun run test
 **Alembic workflow:** All schema changes go through Alembic migrations. The initial migration (`0001_initial.py`) creates all tables. On startup, the app runs `alembic upgrade head` automatically in the lifespan handler.
 
 **Rules for database code:**
-1. All SQL lives in `db/repository.py` — parameterised, no f-string interpolation.
-2. Use `$1, $2, $3...` placeholders for asyncpg (not `?` as in aiosqlite).
-3. All timestamps stored as TIMESTAMPTZ via ISO 8601 strings parsed by Postgres.
-4. TEXT primary keys for chat tables (text UUIDs generated via `_new_id()`).
-5. UUID primary keys for auth tables (`gen_random_uuid()` in Postgres).
+1. Factory SQL lives in the factory repository selected by `factory_store.py`; route handlers do not contain SQL.
+2. SQL Server factory storage uses parameterized pyodbc queries and `NVARCHAR(MAX)` for JSON payloads.
+3. Postgres compatibility storage uses `$1, $2, $3...` placeholders for asyncpg.
+4. Legacy chat/RAG SQL remains in `db/repository.py` and should not be mixed with factory portal storage.
+5. All timestamps should be stored in UTC-compatible ISO 8601 strings or database-native UTC fields.
 
 ---
 
-## RAG Pipeline Invariants
+## Legacy RAG Pipeline Invariants
 
-These behaviors are part of DynaChat's contract and must not regress. The agent-browser regression test verifies most of them.
+These behaviors are part of the inherited DynaChat scaffold and must not regress when a PAVE task touches chat/RAG code. They are not the mission for new PAVE worker features.
 
 1. **Chunking** uses Docling `HybridChunker` with `max_tokens=512` (`HYBRID_CHUNKER_MAX_TOKENS` in `config.py`). Do not swap to recursive-character splitters or LangChain chunkers.
 2. **Embeddings** come from OpenRouter's `openai/text-embedding-3-small` (1536-dim). Never call a different embedding model or provider. Never embed on the frontend.
 3. **Retrieval** is in-process NumPy cosine similarity over all chunks, top-k = 5. This is acceptable until the library grows large. Do not introduce a vector database (FAISS, Chromo, pgvector) without an explicit issue authorizing it — that's an architectural change requiring human approval. **Exception (issue #59):** hybrid retrieval via Reciprocal Rank Fusion (RRF) combining Postgres tsvector keyword search with pgvector cosine similarity is authorized. See `app/backend/rag/retriever_hybrid.py`.
-4. **Chat completion** uses OpenRouter's `anthropic/claude-sonnet-4.6` via the `openai` SDK pointed at `https://openrouter.ai/api/v1`. Do not change the provider or the model in a PR — that's out of scope per MISSION.md.
+4. **Chat completion** uses OpenRouter's `anthropic/claude-sonnet-4.6` via the `openai` SDK pointed at `https://openrouter.ai/api/v1`. Do not change the provider or the model in a legacy chat/RAG PR unless the PAVE task explicitly authorizes it.
 5. **Streaming format:** Server-Sent Events with JSON-encoded tokens. Each token is framed as `data: <json-string>\n\n`. The `sources` event is emitted as `event: sources\ndata: <json-array>\n\n` **before** the `data: [DONE]\n\n` terminator. Do not change this format — the frontend parser in `useStreamingResponse.ts` depends on it exactly.
 6. **Citations** must include video title, video URL, exact timestamp deep-link, and the quoted transcript snippet. The citation modal opens an embedded YouTube player at the timestamp. This is a MISSION.md quality bar — removing or regressing any of these fields is an auto-reject.
 
@@ -280,6 +303,11 @@ All env var reads happen in `app/backend/config.py`. Add new variables there and
 | `YOUTUBE_CHANNEL_ID` | prod (channel sync) | YouTube channel ID/handle to sync videos from via `POST /api/channels/sync` |
 | `CHANNEL_SYNC_TYPE` | prod (channel sync) | Content type filter for channel sync: `all`, `video`, `short`, `live`. Default: `video` |
 | `DATABASE_URL` | **yes** (prod + dev) | Postgres connection string. Shape: `postgresql://dynachat:<pw>@127.0.0.1:5433/dynachat`. The app refuses to start if this is unset (no SQLite fallback). |
+| `FACTORY_STORAGE_PROVIDER` | No (default: `sqlserver`) | Factory portal storage provider. Use `sqlserver` for WTG deployment and `postgres` only for compatibility. |
+| `FACTORY_SQLSERVER_CONNECTION_STRING` | factory SQL Server | SQL Server ODBC connection string for factory portal state. Required when `FACTORY_STORAGE_PROVIDER=sqlserver`. |
+| `PAVE_BOARD_NAME` | factory | PAVE board to scout. Defaults to `Peter's Board` in the service controller for this experiment. |
+| `PAVE_STAFF_CODE` | factory | Staff code used by the scout/executor when OAuth staff-code detection is unavailable. Defaults to `PWS` for this experiment. |
+| `FACTORY_WORKER_TOKEN` | factory | Bearer token used by the scout worker when writing portal state. The service controller creates a local token file under `.factory/`. |
 | `CORS_ORIGINS` | No (dev default) | Comma-separated list of allowed CORS origins. Defaults to `http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}`. Used in `app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS)` in `main.py`. |
 | `CATALOG_ENABLED` | No (default: `false`) | Injects a video-catalog block into the system prompt to enable Anthropic prompt caching. Accepted values: `1`, `true`, `yes`, `on`. Adds input tokens on every request (even cache hits). |
 | `CATALOG_TIER` | No (default: `standard`) | Cache tier: `standard` = ~5-min ephemeral; `extended` = 1-hour TTL (3600 s). Ignored when `CATALOG_ENABLED` is false. |
@@ -296,7 +324,7 @@ NEW_CONSTANT: int = int(os.environ.get("NEW_CONSTANT", "42"))
 
 ## Deployment
 
-**DynaChat ships via Docker Compose to a Digital Ocean VPS at `chat.dynamous.ai`.** Source of truth for the compose stack lives in this repo at `deploy/` (committed, readable to the factory). The real `.env` lives **only** on the prod host at `/opt/dynachat/.env` (root-owned, mode 600) and is never in git, never in an LLM context, and never readable by the factory's `archon` user without `sudo`.
+**Legacy DynaChat scaffold deployment:** the inherited app ships via Docker Compose to a Digital Ocean VPS at `chat.dynamous.ai`. Source of truth for that compose stack lives in this repo at `deploy/` (committed, readable to the factory). The real `.env` lives **only** on the prod host at `/opt/dynachat/.env` (root-owned, mode 600) and is never in git, never in an LLM context, and never readable by the factory's `archon` user without `sudo`.
 
 ### Production host layout
 

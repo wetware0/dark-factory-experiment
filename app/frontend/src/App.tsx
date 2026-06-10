@@ -91,6 +91,10 @@ function ConversationPage() {
 }
 
 function LandingPage() {
+  return <FactoryDashboard />;
+}
+
+function LegacyChatPage() {
   return <AppLayout />;
 }
 
@@ -108,6 +112,14 @@ function App() {
               element={
                 <RequireAuth>
                   <LandingPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/chat"
+              element={
+                <RequireAuth>
+                  <LegacyChatPage />
                 </RequireAuth>
               }
             />

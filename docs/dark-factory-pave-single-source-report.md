@@ -21,11 +21,15 @@ The requested target is:
 
 The initial version of this document was a report-only handoff. The repository now contains an implementation slice for the portal, scout worker, Archon PAVE workflow assets, and local service controls. The remaining hard dependency is a concrete callable ediProd/PAVE lifecycle adapter for claim/start/suspend/complete/eDoc upload.
 
+The repository has now been reframed around the PAVE/CargoWise worker mission. The former DynaChat application remains only as inherited scaffold and a legacy authenticated UI shell; `/factory` is the default product surface.
+
 ## Implementation Snapshot Added 2026-06-10
 
 Implemented in this branch:
 
 - Fork/branch target: `wetware0/dark-factory-experiment`, branch `codex/pave-dark-factory-wetware0`.
+- Repository identity: PAVE Dark Factory Worker for CargoWise tasks, with the inherited DynaChat app demoted to legacy scaffold.
+- Default authenticated route: `/factory`; legacy chat remains at `/chat` and `/c/:conversationId`.
 - Durable assumptions and decisions log: `docs/pave-factory-implementation-decisions.md`.
 - Factory portal storage selector: `app/backend/db/factory_store.py`.
 - Preferred WTG factory portal database: SQL Server through `app/backend/db/factory_sqlserver_repository.py`.
@@ -63,7 +67,7 @@ FACTORY_STORAGE_PROVIDER=sqlserver
 FACTORY_SQLSERVER_CONNECTION_STRING="Driver={ODBC Driver 18 for SQL Server};Server=YOURSERVER;Database=DarkFactory;Trusted_Connection=yes;TrustServerCertificate=yes;"
 ```
 
-The existing DynaChat chat/RAG app still requires its existing `DATABASE_URL` Postgres/pgvector database. Migrating the chat/RAG side to SQL Server is deliberately separate because retrieval currently depends on Postgres full-text search and pgvector.
+The inherited DynaChat chat/RAG scaffold still requires its existing `DATABASE_URL` Postgres/pgvector database. Migrating that legacy side to SQL Server is deliberately separate because retrieval currently depends on Postgres full-text search and pgvector.
 
 ## Inputs Reviewed
 
@@ -95,7 +99,7 @@ WTG/PAVE-specific:
 
 ## Current Experiment Baseline
 
-The current repository is not PAVE-driven. It is a DynaChat web app plus an Archon-based Dark Factory automation layer.
+The repository originally arrived as a DynaChat web app plus an Archon-based GitHub issue factory. This branch reframes it as a PAVE/CargoWise worker while retaining the useful Archon and authenticated web-app scaffold.
 
 Current control flow:
 
@@ -117,7 +121,7 @@ The important existing design assets to preserve are:
 - Bounded parallelism and per-target locking.
 - Explicit quality gates before merge.
 
-The important current limitation is that GitHub, not PAVE, is the source of operational truth. To satisfy the requested design, the orchestrator must stop treating GitHub labels as the primary queue and instead use PAVE task state as the primary queue.
+The important legacy limitation was that GitHub, not PAVE, was the source of operational truth. The new PAVE worker path must keep GitHub as source control and PR review state only; PAVE task state remains the operational queue.
 
 ## Target Architecture
 
@@ -1122,7 +1126,7 @@ Recommended for this repo:
 - Add components under `app/frontend/src/components/factory/`.
 - Add API wrappers in `app/frontend/src/lib/api.ts` or a new `factoryApi.ts` if the team intentionally splits the API file.
 
-The current app is DynaChat-specific. If this portal will become a separate internal product, consider creating a new app instead of mixing it into the public DynaChat surface. If it remains in this repo, gate all factory routes behind admin/internal auth.
+The current app still contains inherited DynaChat-specific code. The portal is now the primary product surface in this repo, while legacy chat/RAG routes should remain gated and treated as scaffold until a future cleanup task removes or separates them.
 
 ### Data Model
 
@@ -2843,7 +2847,7 @@ These need owner decisions before coding:
    - Should the audit report be uploaded as `.html`, `.md`, `.pdf`, or multiple formats?
    - Which eDoc document type should be primary: `INT`, `TSH`, or a dedicated agentic evidence type?
 6. Portal deployment:
-   - Extend this DynaChat app or create a separate internal portal?
+   - Keep the portal in this reframed repo or later split legacy DynaChat scaffold into a separate app?
 7. Synthetic GitHub issue bridge:
    - Allowed as a temporary migration step?
    - Or should PAVE-native Archon workflows be built first?

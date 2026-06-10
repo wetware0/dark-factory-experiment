@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
     await close_pg_pool()
 
 
-app = FastAPI(title="RAG YouTube Chat API", lifespan=lifespan)
+app = FastAPI(title="PAVE Dark Factory API", lifespan=lifespan)
 
 # Allow the Vite dev server to reach the API during development
 app.add_middleware(
@@ -158,7 +158,7 @@ async def health():
 @app.get("/api/version")
 async def version() -> dict[str, str]:
     try:
-        return {"version": get_version("dynachat-backend")}
+        return {"version": get_version("pave-dark-factory-backend")}
     except PackageNotFoundError:
         raise HTTPException(status_code=503, detail="Package metadata unavailable") from None
 

@@ -288,7 +288,7 @@ export function FactoryDashboard() {
             </div>
             <h1 className="mt-1 text-2xl font-semibold">Factory control portal</h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Board: Peter's Board. Staff code: PWS. PAVE remains the source of truth.
+              Board: Peter's Board. Staff code: PWS. CargoWise work starts and reports through PAVE.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -307,10 +307,10 @@ export function FactoryDashboard() {
               Library admin
             </Link>
             <Link
-              to="/"
+              to="/chat"
               className="border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
             >
-              Chat
+              Legacy chat
             </Link>
           </div>
         </div>

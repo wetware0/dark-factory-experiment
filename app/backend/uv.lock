@@ -380,60 +380,6 @@ chunking-openai = [
 ]
 
 [[package]]
-name = "dynachat-backend"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "asyncpg" },
-    { name = "bcrypt" },
-    { name = "docling-core", extra = ["chunking", "chunking-openai"] },
-    { name = "email-validator" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "pyjwt" },
-    { name = "pyodbc" },
-    { name = "python-dotenv" },
-    { name = "supadata" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "respx" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic" },
-    { name = "asyncpg" },
-    { name = "bcrypt" },
-    { name = "docling-core", extras = ["chunking", "chunking-openai"] },
-    { name = "email-validator" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = "==1.14.1" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "pyjwt" },
-    { name = "pyodbc" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = "==8.3.4" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = "==0.25.2" },
-    { name = "python-dotenv" },
-    { name = "respx", marker = "extra == 'dev'", specifier = "==0.22.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.9.2" },
-    { name = "supadata" },
-    { name = "uvicorn", extras = ["standard"] },
-]
-provides-extras = ["dev"]
-
-[[package]]
 name = "email-validator"
 version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1167,6 +1113,60 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/00/2f/b622683e99ec3ce00b0854bac9e80868592c5b051733f2cf3a868e5fea26/pandas-3.0.2-cp314-cp314t-win_amd64.whl", hash = "sha256:57a07209bebcbcf768d2d13c9b78b852f9a15978dac41b9e6421a81ad4cdd276", size = 10888530, upload-time = "2026-03-31T06:48:25.806Z" },
     { url = "https://files.pythonhosted.org/packages/cb/2b/f8434233fab2bd66a02ec014febe4e5adced20e2693e0e90a07d118ed30e/pandas-3.0.2-cp314-cp314t-win_arm64.whl", hash = "sha256:5371b72c2d4d415d08765f32d689217a43227484e81b2305b52076e328f6f482", size = 9455341, upload-time = "2026-03-31T06:48:28.418Z" },
 ]
+
+[[package]]
+name = "pave-dark-factory-backend"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "asyncpg" },
+    { name = "bcrypt" },
+    { name = "docling-core", extra = ["chunking", "chunking-openai"] },
+    { name = "email-validator" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "numpy" },
+    { name = "openai" },
+    { name = "pyjwt" },
+    { name = "pyodbc" },
+    { name = "python-dotenv" },
+    { name = "supadata" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "respx" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic" },
+    { name = "asyncpg" },
+    { name = "bcrypt" },
+    { name = "docling-core", extras = ["chunking", "chunking-openai"] },
+    { name = "email-validator" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = "==1.14.1" },
+    { name = "numpy" },
+    { name = "openai" },
+    { name = "pyjwt" },
+    { name = "pyodbc" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = "==8.3.4" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = "==0.25.2" },
+    { name = "python-dotenv" },
+    { name = "respx", marker = "extra == 'dev'", specifier = "==0.22.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.9.2" },
+    { name = "supadata" },
+    { name = "uvicorn", extras = ["standard"] },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "pillow"

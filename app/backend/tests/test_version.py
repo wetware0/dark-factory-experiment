@@ -24,9 +24,9 @@ async def test_version_endpoint_returns_200():
 
 
 async def test_version_endpoint_returns_503_when_package_not_found():
-    """GET /api/version returns 503 when dynachat-backend package is not installed."""
+    """GET /api/version returns 503 when backend package metadata is unavailable."""
     with patch("backend.main.get_version") as mock_get_version:
-        mock_get_version.side_effect = PackageNotFoundError("dynachat-backend")
+        mock_get_version.side_effect = PackageNotFoundError("pave-dark-factory-backend")
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/api/version")

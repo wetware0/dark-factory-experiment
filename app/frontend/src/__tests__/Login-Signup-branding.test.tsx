@@ -48,7 +48,7 @@ vi.mock('../lib/authApi', () => ({
   }),
 }));
 
-const brandingText = "Ask Cole Medin's YouTube videos and Dynamous lessons anything";
+const brandingText = 'Agentic CargoWise work from PAVE tasks';
 
 describe('Login page', () => {
   it('renders branding header with logo, title, and tagline', () => {
@@ -58,8 +58,8 @@ describe('Login page', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByAltText('DynaChat logo')).toBeInTheDocument();
-    expect(screen.getByText('DynaChat')).toBeInTheDocument();
+    expect(screen.getByAltText('PAVE Dark Factory logo')).toBeInTheDocument();
+    expect(screen.getByText('PAVE Dark Factory')).toBeInTheDocument();
     expect(screen.getByText(brandingText)).toBeInTheDocument();
   });
 
@@ -95,8 +95,8 @@ describe('Signup page', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByAltText('DynaChat logo')).toBeInTheDocument();
-    expect(screen.getByText('DynaChat')).toBeInTheDocument();
+    expect(screen.getByAltText('PAVE Dark Factory logo')).toBeInTheDocument();
+    expect(screen.getByText('PAVE Dark Factory')).toBeInTheDocument();
     expect(screen.getByText(brandingText)).toBeInTheDocument();
   });
 
@@ -138,16 +138,16 @@ describe('Login and Signup branding consistency', () => {
     );
 
     // Both should have the logo img with same alt text
-    const loginLogo = loginContainer.querySelector('img[alt="DynaChat logo"]');
-    const signupLogo = signupContainer.querySelector('img[alt="DynaChat logo"]');
+    const loginLogo = loginContainer.querySelector('img[alt="PAVE Dark Factory logo"]');
+    const signupLogo = signupContainer.querySelector('img[alt="PAVE Dark Factory logo"]');
     expect(loginLogo).toBeInTheDocument();
     expect(signupLogo).toBeInTheDocument();
 
-    // Both should have DynaChat title
+    // Both should have the PAVE Dark Factory title
     const loginTitle = loginContainer.querySelector('.text-xl.font-semibold');
     const signupTitle = signupContainer.querySelector('.text-xl.font-semibold');
-    expect(loginTitle?.textContent).toBe('DynaChat');
-    expect(signupTitle?.textContent).toBe('DynaChat');
+    expect(loginTitle?.textContent).toBe('PAVE Dark Factory');
+    expect(signupTitle?.textContent).toBe('PAVE Dark Factory');
 
     // Both should have the tagline
     expect(loginContainer.textContent).toContain(brandingText);
