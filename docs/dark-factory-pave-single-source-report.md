@@ -36,6 +36,7 @@ Implemented in this branch:
 - Compatibility factory portal database: Postgres through `app/backend/alembic/versions/0006_pave_factory_portal.py` and `app/backend/db/factory_repository.py`.
 - Factory API layer: `app/backend/routes/factory.py`, registered in `app/backend/main.py`.
 - Scout worker CLI: `app/backend/factory/worker.py`.
+- `edi` CLI adapter: `app/backend/factory/edi_cli.py`.
 - Local service control: `scripts/factory-services.ps1`.
 - Dashboard route: `/factory`, implemented in `app/frontend/src/pages/FactoryDashboard.tsx` and `app/frontend/src/lib/api.ts`.
 - PAVE-native Archon workflow and commands:
@@ -46,8 +47,9 @@ Current live-tool finding:
 
 - `codex mcp list` reports `ediprod`, `wtgkb`, and `sbkb` are configured.
 - The callable `ediprod` MCP mutation namespace was not exposed to this implementation thread.
-- The local `edi` CLI fallback was not installed.
-- Therefore the scout records `ediprod` as unavailable for mutation and stalls safely before PAVE polling/claiming. This is expected until the runtime has a concrete PAVE adapter.
+- The local `edi` CLI fallback is now installed.
+- A read-only smoke test detected the OAuth staff code as `PWS`, listed PWS tasks, found no playing task, selected a Peter's Board candidate, and resolved it to a PAVE task ID.
+- The scout now uses `edi staff tasks` for cheap polling and `edi workflow list` / `edi task list` for task ID resolution. It remains dry-run by default and only calls `edi task start` when `FACTORY_SCOUT_DRY_RUN=false`.
 
 Local service commands:
 
@@ -59,6 +61,8 @@ Local service commands:
 ```
 
 The service script starts the backend, frontend, and scout worker, creates `.factory/factory-worker-token.txt` when needed, stores PID files under `.factory/pids`, and writes logs under `.factory/logs`. The dashboard is available at `http://127.0.0.1:5173/factory` when services start successfully.
+
+By default the service script sets `FACTORY_SCOUT_DRY_RUN=true`, so the scout can discover and report a startable task without claiming or starting it in PAVE.
 
 Factory portal storage now defaults to SQL Server:
 

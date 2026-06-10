@@ -215,6 +215,21 @@ FACTORY_SCOUT_INTERVAL_SECONDS: int = int(
     os.environ.get("FACTORY_SCOUT_INTERVAL_SECONDS", "60")
 )
 FACTORY_LOCAL_SCOUT_MODEL: str = os.environ.get("FACTORY_LOCAL_SCOUT_MODEL", "local-scout")
+FACTORY_SCOUT_DRY_RUN: bool = os.environ.get("FACTORY_SCOUT_DRY_RUN", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL: bool = (
+    os.environ.get("FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL", "true").strip().lower()
+    in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+)
 
 # CORS — comma-separated list of allowed origins; defaults to localhost + 127.0.0.1
 # on the configured FRONTEND_PORT so the default dev setup works without any env vars.

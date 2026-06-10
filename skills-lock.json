@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "skills": {
+    "board-troubleshooting": {
+      "source": "git@github.com:WiseTechGlobal/mcp-ediprod.git",
+      "sourceType": "git",
+      "skillPath": "skills/board-troubleshooting/SKILL.md",
+      "computedHash": "e807b92973514ebf60e67a66656b2ac3548ca1790f08d422ac53f27b919f9833"
+    },
+    "code-review": {
+      "source": "git@github.com:WiseTechGlobal/mcp-ediprod.git",
+      "sourceType": "git",
+      "skillPath": ".claude/skills/code-review/SKILL.md",
+      "computedHash": "7859faf1fdf2537d3ae4da2c646e881cf408b401f04a96b0ffcd31e25ff4dca3"
+    },
+    "ediprod": {
+      "source": "git@github.com:WiseTechGlobal/mcp-ediprod.git",
+      "sourceType": "git",
+      "skillPath": "skills/ediprod/SKILL.md",
+      "computedHash": "d476ec12148b15e564cbff7532bcac444cf249ab9a09ffc0600cbe657f8f2445"
+    },
+    "ediprod-cli": {
+      "source": "git@github.com:WiseTechGlobal/mcp-ediprod.git",
+      "sourceType": "git",
+      "skillPath": "skills/ediprod-cli/SKILL.md",
+      "computedHash": "73ae91f83094f2b7448b2ef0547af2ec1ff728e693a5466a391c01198ae93a3d"
+    },
+    "glow-api": {
+      "source": "git@github.com:WiseTechGlobal/mcp-ediprod.git",
+      "sourceType": "git",
+      "skillPath": ".claude/skills/glow-api/SKILL.md",
+      "computedHash": "3f9c89eb0dab50d44bb8b04950adb2c7a2e8172a4fb6be77742a1f21c1d97d89"
+    },
+    "pave": {
+      "source": "git@github.com:WiseTechGlobal/mcp-ediprod.git",
+      "sourceType": "git",
+      "skillPath": "skills/pave/SKILL.md",
+      "computedHash": "896e90f15c6dc1e58e8a88dbbe45fc2269b1f5c8585c0b80bdef2cd20010305e"
+    },
+    "workitem-status": {
+      "source": "git@github.com:WiseTechGlobal/mcp-ediprod.git",
+      "sourceType": "git",
+      "skillPath": "skills/workitem-status/SKILL.md",
+      "computedHash": "3e45fc88f4ddee325f5f35672bcda3933b6d03f84fc4e1286a69b98e0decdac9"
+    }
+  }
+}

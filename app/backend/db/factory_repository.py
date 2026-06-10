@@ -374,6 +374,7 @@ async def finish_scout_cycle(
     *,
     status: str,
     selected_pave_task_id: str | None = None,
+    candidate_count: int | None = None,
     decision: str | None = None,
     summary: str | None = None,
     output_snapshot: dict[str, Any] | None = None,
@@ -385,9 +386,10 @@ async def finish_scout_cycle(
             UPDATE factory_scout_cycles
             SET status = $2,
                 selected_pave_task_id = $3,
-                decision = $4,
-                summary = $5,
-                output_snapshot = $6::jsonb,
+                candidate_count = COALESCE($4, candidate_count),
+                decision = $5,
+                summary = $6,
+                output_snapshot = $7::jsonb,
                 finished_at = now()
             WHERE id = $1::uuid
             RETURNING *
@@ -395,6 +397,7 @@ async def finish_scout_cycle(
             cycle_id,
             status,
             selected_pave_task_id,
+            candidate_count,
             decision,
             summary,
             _to_json(output_snapshot),

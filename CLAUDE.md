@@ -57,6 +57,7 @@ pave-dark-factory-worker/
 │   │   ├── pyproject.toml   # uv dependencies + tool config (ruff, mypy, pytest)
 │   │   ├── uv.lock          # uv lockfile (committed, pinned versions)
 │   │   ├── factory/
+│   │   │   ├── edi_cli.py    # edi CLI adapter for PAVE scout operations
 │   │   │   └── worker.py    # PAVE scout worker entry point
 │   │   ├── data/
 │   │   │   ├── chat.db      # SQLite database (auto-created, gitignored)
@@ -308,6 +309,8 @@ All env var reads happen in `app/backend/config.py`. Add new variables there and
 | `PAVE_BOARD_NAME` | factory | PAVE board to scout. Defaults to `Peter's Board` in the service controller for this experiment. |
 | `PAVE_STAFF_CODE` | factory | Staff code used by the scout/executor when OAuth staff-code detection is unavailable. Defaults to `PWS` for this experiment. |
 | `FACTORY_WORKER_TOKEN` | factory | Bearer token used by the scout worker when writing portal state. The service controller creates a local token file under `.factory/`. |
+| `FACTORY_SCOUT_DRY_RUN` | factory | Defaults to `true`. When true, the scout reports selected startable work but does not call `edi task start`. |
+| `FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL` | factory | Defaults to `true`. Includes capability-pool tasks in the low-token staff task scan. |
 | `CORS_ORIGINS` | No (dev default) | Comma-separated list of allowed CORS origins. Defaults to `http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}`. Used in `app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS)` in `main.py`. |
 | `CATALOG_ENABLED` | No (default: `false`) | Injects a video-catalog block into the system prompt to enable Anthropic prompt caching. Accepted values: `1`, `true`, `yes`, `on`. Adds input tokens on every request (even cache hits). |
 | `CATALOG_TIER` | No (default: `standard`) | Cache tier: `standard` = ~5-min ephemeral; `extended` = 1-hour TTL (3600 s). Ignored when `CATALOG_ENABLED` is false. |

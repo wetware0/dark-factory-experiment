@@ -26,13 +26,22 @@ This log records the assumptions, decisions, and operational constraints used wh
 - Runtime default staff code is configurable through `PAVE_STAFF_CODE`.
 - The worker must still try to detect the staff code belonging to the active ediProd OAuth credentials before claiming work. If detection is unavailable, it must fall back to the configured staff code and mark the MCP readiness state as degraded.
 
-## Live Tool Constraint Found During Implementation
+## Live Tool Constraint Found During Initial Implementation
 
 - `codex mcp list` showed `ediprod`, `wtgkb`, and `sbkb` configured.
 - The live `ediprod` MCP mutation namespace was not exposed as a callable tool in this thread.
 - The fallback `edi` CLI was not installed locally.
 - Therefore, implementation must not pretend to claim, start, close, suspend, assign, or upload eDoc evidence until a concrete MCP or CLI adapter is available at runtime.
 - The system fails closed by pausing scout/agent work when required MCPs are stale, unauthenticated, or unavailable, and the dashboard visualizes the stalled state.
+
+## Live Tool Update After edi CLI Install
+
+- `edi` is now available on PATH at `C:\Users\peter\.bun\bin\edi.exe`.
+- `edi staff get` detects the OAuth staff code as `PWS`.
+- A read-only `edi staff tasks PWS --include-capability-pool` probe returned Peter's Board tasks and confirmed no `WRK` task was playing for `PWS` at the time of the probe.
+- The scout can resolve a selected Peter's Board task to a concrete PAVE task ID by using `edi workflow list` and `edi task list` after the cheap staff-task scan.
+- The local scout still defaults to `FACTORY_SCOUT_DRY_RUN=true`. Claim/start mutation through `edi task start` requires explicitly setting `FACTORY_SCOUT_DRY_RUN=false`.
+- Project-local WTG/PAVE skills were added under `.agents/skills` and `.claude/skills`, with `skills-lock.json` recording hashes.
 
 ## Database Decision
 

@@ -69,8 +69,16 @@ Default local operating inputs:
 
 - PAVE board: `Peter's Board`
 - staff code: `PWS`
+- scout dry-run: `true`
 
 Override these with script parameters or environment variables when running another worker pool.
+
+The scout uses the `edi` CLI when present:
+
+- `edi staff get` detects the staff code attached to the active OAuth credentials.
+- `edi staff tasks --include-capability-pool` performs the low-token board scan.
+- `edi workflow list` and `edi task list` resolve the selected staff-task row to a concrete PAVE task ID.
+- `edi task start` is only called when `FACTORY_SCOUT_DRY_RUN=false`; the default service script keeps dry-run enabled.
 
 ---
 
@@ -120,6 +128,7 @@ Important design constraints:
 | Path | Purpose |
 | --- | --- |
 | `app/backend/factory/worker.py` | Scout worker entry point. |
+| `app/backend/factory/edi_cli.py` | `edi` CLI adapter for staff detection, startable-task polling, task ID resolution, and guarded lifecycle calls. |
 | `app/backend/routes/factory.py` | Factory portal API. |
 | `app/backend/db/factory_store.py` | Factory storage provider selector. |
 | `app/backend/db/factory_sqlserver_repository.py` | SQL Server factory storage. |
@@ -129,6 +138,9 @@ Important design constraints:
 | `docs/dark-factory-pave-single-source-report.md` | Deep implementation handoff report. |
 | `docs/pave-factory-implementation-decisions.md` | Assumptions and decisions log. |
 | `scripts/factory-services.ps1` | Start/stop/status controller. |
+| `.agents/skills/` | Project-local WTG/PAVE skills used by agent workers. |
+| `.claude/skills/` | Claude-compatible copy of project skills. |
+| `skills-lock.json` | Hash lock for the project-local skills. |
 
 ---
 
@@ -159,10 +171,12 @@ Implemented in this branch:
 - PAVE-native Archon workflow and command files.
 - Local service controller for start, stop, restart, and status.
 
-Known live-tool constraint:
+Known live-tool state:
 
-- `ediprod`, `wtgkb`, and `sbkb` are configured in Codex, but the callable ediProd mutation namespace was not exposed to this implementation thread and the local `edi` CLI fallback was not installed.
-- Until a concrete ediProd/PAVE lifecycle adapter is callable at runtime, the scout must remain stalled before polling, claiming, starting, suspending, completing, assigning, or uploading eDoc evidence.
+- `ediprod`, `wtgkb`, and `sbkb` are configured in Codex.
+- The callable ediProd MCP mutation namespace was not exposed to this implementation thread.
+- The local `edi` CLI is now installed and can detect the OAuth staff code, list PWS tasks, and resolve a Peter's Board startable task to a concrete task ID.
+- The scout defaults to dry-run. Set `FACTORY_SCOUT_DRY_RUN=false` only when the operator wants the scout to call `edi task start` after the play guard passes.
 
 ---
 
