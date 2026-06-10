@@ -48,8 +48,9 @@ Current live-tool finding:
 - `codex mcp list` reports `ediprod`, `wtgkb`, and `sbkb` are configured.
 - The callable `ediprod` MCP mutation namespace was not exposed to this implementation thread.
 - The local `edi` CLI fallback is now installed.
-- A read-only smoke test detected the OAuth staff code as `PWS`, listed PWS tasks, found no playing task, selected a Peter's Board candidate, and resolved it to a PAVE task ID.
-- The scout now uses `edi staff tasks` for cheap polling and `edi workflow list` / `edi task list` for task ID resolution. It remains dry-run by default and only calls `edi task start` when `FACTORY_SCOUT_DRY_RUN=false`.
+- A read-only smoke test detected the OAuth staff code as `PWS`, confirmed `C50` exists as `Copilot Code Reviewer (C50)`, and found zero returned tasks for `C50`.
+- The scout now uses `edi staff tasks C50 --include-capability-pool` for cheap polling and `edi workflow list` / `edi task list` for task ID resolution. It remains dry-run by default and only calls `edi task start` when `FACTORY_SCOUT_DRY_RUN=false`, `FACTORY_ARCHON_EXECUTE=true`, the play guard passes, and the OAuth staff guard permits live mutation.
+- For this dark-factory instance, `C50` is the execution staff code and `PWS` is the guardian staff code. Current `PWS` OAuth credentials can inspect `C50` tasks but cannot live-start `C50` work unless `FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true` is explicitly set.
 
 Local service commands:
 
@@ -276,7 +277,7 @@ Reason:
 Scout responsibilities:
 
 - Poll PAVE at a configured interval.
-- Check whether the configured staff code already has a playing task.
+- Check whether the execution staff code already has a playing task.
 - If any other task is playing for that staff code, do not select or start a new task.
 - Discover and rank truly-startable candidates.
 - Use deterministic ranking first.
@@ -453,15 +454,16 @@ Important exclusions:
 Recommended discovery sequence:
 
 1. Resolve the worker's staff identity.
-  - Prefer explicit `PAVE_STAFF_CODE`.
-  - Otherwise use current MCP profile.
+  - Prefer explicit `PAVE_STAFF_CODE` as the execution staff code.
+  - Record the current MCP/OAuth profile separately.
+  - Block live mutation if OAuth staff differs from execution staff and the mismatch override is not explicitly enabled.
 2. Resolve allowed boards.
   - Load staff profile and verify configured board exists in `bufferBoards`.
 3. Read tickets from PAVE.
   - Staff lookup: assigned tasks.
   - Optional capability lookup: capability pool tasks, if the worker is configured to claim capability work.
 4. Normalize tickets into candidate task rows.
-5. Drop tasks not assigned to the configured staff unless capability claiming is explicitly enabled.
+5. Drop tasks not assigned to the execution staff unless capability claiming is explicitly enabled.
 6. Drop tasks with `startable != true`.
 7. Fetch workflows for each candidate job.
 8. Determine owning workflow.
@@ -556,7 +558,9 @@ Scout-to-agent handoff payload:
   "handoffVersion": 1,
   "runId": "<portal-run-id>",
   "scoutInstanceId": "<scout-id>",
-  "staffCode": "PWS",
+  "staffCode": "C50",
+  "guardianStaffCode": "PWS",
+  "oauthStaffCode": "<detected-oauth-staff>",
   "boardName": "Peter's Board",
   "claimState": "claimed",
   "claimedAt": "2026-06-10T00:00:00Z",
@@ -1654,7 +1658,8 @@ Each scout instance should:
 1. Register with the portal.
 2. Verify MCP readiness:
    - `ediprod` present, fresh, and authenticated.
-   - playing-task detection available for the configured staff code.
+   - playing-task detection available for the execution staff code.
+   - live mutation staff-code guard configured for `C50` execution and `PWS` guardian escalation.
    - portal write endpoints available.
 3. Pause immediately when a required MCP is stale or unauthenticated.
 4. Poll PAVE for startable work using a low-token path.
@@ -1719,10 +1724,14 @@ FACTORY_REPO_DISCOVERY_MODE=explicit|glob|pave_metadata
 CARGOWISE_PRIMARY_REPO=C:\git\CargoWise
 CARGOWISE_MODULE_REPO_GLOB=C:\git\CargoWise.*
 PAVE_BOARD_NAME=Peter's Board
-PAVE_STAFF_CODE=PWS
+PAVE_STAFF_CODE=C50
+PAVE_GUARDIAN_STAFF_CODE=PWS
 PAVE_CAPABILITY_CODES=CUSGEN,CUSPRD
 PAVE_DISCOVERY_LIMIT=5
-PAVE_DRY_RUN=false
+PAVE_DRY_RUN=true
+FACTORY_SCOUT_DRY_RUN=true
+FACTORY_ARCHON_EXECUTE=false
+FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=false
 PAVE_POLL_INTERVAL_SECONDS=60
 PAVE_BACKOFF_SECONDS=300
 PAVE_MAX_ACTIVE_RUNS=1
@@ -2426,7 +2435,7 @@ Deliverables:
   - reauth support is detectable for OAuth-backed MCPs.
   - installed skills/plugins/prompt repositories are inventoried.
   - latest-version checks can run for WTG.AI.Prompts, local skills/plugins, and configured MCP server packages.
-  - scout mode can detect whether the configured staff code has a playing task.
+  - scout mode can detect whether the execution staff code has a playing task.
   - eDoc upload is available when `AUDIT_EDOC_REQUIRED=true`.
   - local scout LLM endpoint is reachable if `SCOUT_USE_LLM_TIEBREAK=true`.
   - Archon CLI is present.

@@ -1,4 +1,7 @@
+import subprocess
+
 from backend.factory.edi_cli import (
+    EdiCli,
     find_playing_tasks,
     normalise_staff_tasks,
     select_startable_candidate,
@@ -120,3 +123,21 @@ def test_task_matches_candidate_uses_sequence_type_status_description_and_starta
         },
         candidate,
     )
+
+
+def test_append_task_notes_uses_cli_content_option(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="updated", stderr="")
+
+    monkeypatch.setattr("backend.factory.edi_cli.subprocess.run", fake_run)
+
+    cli = EdiCli("edi")
+    output = cli.append_task_notes("task-123", "Needs guardian review")
+
+    assert output == "updated"
+    assert calls == [
+        ["edi", "task", "notes", "append", "task-123", "--content", "Needs guardian review"]
+    ]

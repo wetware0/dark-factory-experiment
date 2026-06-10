@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
 import {
   type FactoryArtifact,
+  type FactoryConfig,
   type FactoryCriticReport,
   type FactoryInstance,
   type FactoryLearningAssessment,
@@ -16,6 +17,7 @@ import {
   type FactoryTool,
   type FactoryToolingJob,
   checkLatestFactoryTooling,
+  getFactoryConfig,
   getFactoryEvidenceReport,
   getFactoryRun,
   getFactoryStalled,
@@ -120,6 +122,7 @@ export function FactoryDashboard() {
   const { status, user } = useAuth();
   const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState<FactoryTab>('overview');
+  const [factoryConfig, setFactoryConfig] = useState<FactoryConfig | null>(null);
   const [summary, setSummary] = useState<FactorySummary | null>(null);
   const [instances, setInstances] = useState<FactoryInstance[]>([]);
   const [mcps, setMcps] = useState<FactoryMcpReadiness[]>([]);
@@ -136,16 +139,26 @@ export function FactoryDashboard() {
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const [summaryRes, instancesRes, mcpRes, runsRes, stalledRes, toolingRes, learningRes] =
-        await Promise.all([
-          getFactorySummary(),
-          listFactoryInstances(),
-          listFactoryMcpReadiness(),
-          listFactoryRuns(),
-          getFactoryStalled(),
-          listFactoryTooling(),
-          listFactoryLearningAssessments(),
-        ]);
+      const [
+        configRes,
+        summaryRes,
+        instancesRes,
+        mcpRes,
+        runsRes,
+        stalledRes,
+        toolingRes,
+        learningRes,
+      ] = await Promise.all([
+        getFactoryConfig(),
+        getFactorySummary(),
+        listFactoryInstances(),
+        listFactoryMcpReadiness(),
+        listFactoryRuns(),
+        getFactoryStalled(),
+        listFactoryTooling(),
+        listFactoryLearningAssessments(),
+      ]);
+      setFactoryConfig(configRes);
       setSummary(summaryRes);
       setInstances(instancesRes.instances);
       setMcps(mcpRes.mcps);
@@ -288,7 +301,9 @@ export function FactoryDashboard() {
             </div>
             <h1 className="mt-1 text-2xl font-semibold">Factory control portal</h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Board: Peter's Board. Staff code: PWS. CargoWise work starts and reports through PAVE.
+              Board: {factoryConfig?.board_name ?? "Peter's Board"}. Staff:{' '}
+              {factoryConfig?.execution_staff_code ?? 'C50'}. Guardian:{' '}
+              {factoryConfig?.guardian_staff_code ?? 'PWS'}.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

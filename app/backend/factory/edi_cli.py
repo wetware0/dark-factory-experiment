@@ -280,7 +280,7 @@ class EdiCli:
         return (result.stdout or result.stderr).strip()
 
     def append_task_notes(self, task_id: str, content: str) -> str:
-        result = self._run(["task", "notes", "append", task_id, content], timeout=60)
+        result = self._run(["task", "notes", "append", task_id, "--content", content], timeout=60)
         return (result.stdout or result.stderr).strip()
 
     def upload_file(

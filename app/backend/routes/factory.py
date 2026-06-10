@@ -199,6 +199,22 @@ class ToolingUpdateRequest(BaseModel):
     to_version: str | None = None
 
 
+class ToolingJobPatch(BaseModel):
+    status: str | None = None
+    log_entry: dict[str, Any] | None = None
+    error_message: str | None = None
+    set_started: bool = False
+    set_finished: bool = False
+
+
+class FactoryConfigOut(BaseModel):
+    board_name: str
+    execution_staff_code: str
+    guardian_staff_code: str
+    scout_dry_run: bool
+    archon_execute: bool
+
+
 async def require_worker(request: Request) -> dict[str, str]:
     expected = config.FACTORY_WORKER_TOKEN
     if not expected:
@@ -238,6 +254,8 @@ async def _build_evidence_report(run_id: str) -> str:
         f"Incident: {run.get('pave_incident_id') or 'unknown'}",
         f"Board: {run.get('pave_board_name') or 'unknown'}",
         f"Staff Code: {run.get('staff_code') or 'unknown'}",
+        f"Assigned To: {run.get('assigned_to_staff_code') or 'unknown'}",
+        f"Workflow: {run.get('workflow_name') or run.get('workflow_id') or 'unknown'}",
         f"Status: {run.get('status')} / {run.get('phase')}",
         f"eDoc Status: {run.get('e_doc_status') or 'not uploaded'}",
         "",
@@ -347,6 +365,17 @@ async def _build_evidence_report(run_id: str) -> str:
 @router.get("/dashboard/summary")
 async def dashboard_summary(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
     return await repo.dashboard_summary()
+
+
+@router.get("/dashboard/config")
+async def dashboard_config(_: dict[str, Any] = Depends(get_current_admin)) -> FactoryConfigOut:
+    return FactoryConfigOut(
+        board_name=config.PAVE_BOARD_NAME,
+        execution_staff_code=config.PAVE_STAFF_CODE,
+        guardian_staff_code=config.PAVE_GUARDIAN_STAFF_CODE,
+        scout_dry_run=config.FACTORY_SCOUT_DRY_RUN,
+        archon_execute=config.FACTORY_ARCHON_EXECUTE,
+    )
 
 
 @router.get("/dashboard/stalled")
@@ -502,6 +531,13 @@ async def get_run_events(
 @router.get("/runs/{run_id}/evidence-report", response_class=PlainTextResponse)
 async def evidence_report(
     run_id: str, _: dict[str, Any] = Depends(get_current_admin)
+) -> PlainTextResponse:
+    return PlainTextResponse(await _build_evidence_report(run_id), media_type="text/markdown")
+
+
+@router.get("/worker/runs/{run_id}/evidence-report", response_class=PlainTextResponse)
+async def worker_evidence_report(
+    run_id: str, _: dict[str, str] = Depends(require_worker)
 ) -> PlainTextResponse:
     return PlainTextResponse(await _build_evidence_report(run_id), media_type="text/markdown")
 
@@ -771,3 +807,32 @@ async def worker_record_tooling(
     _: dict[str, str] = Depends(require_worker),
 ) -> dict[str, Any]:
     return await repo.upsert_tooling_inventory(**body.model_dump())
+
+
+@router.get("/worker/tooling/update-jobs")
+async def worker_list_tooling_update_jobs(
+    worker: dict[str, str] = Depends(require_worker),
+) -> dict[str, Any]:
+    jobs = await repo.list_tooling_update_jobs()
+    tools = await repo.list_tooling_inventory()
+    tool_by_id = {str(item["id"]): item for item in tools}
+    instance_id = worker["actor_id"]
+    visible_jobs = [
+        {**job, "tool": tool_by_id.get(str(job.get("tool_id")))}
+        for job in jobs
+        if job.get("status") == "queued"
+        and (not job.get("instance_id") or str(job.get("instance_id")) == instance_id)
+    ]
+    return {"jobs": visible_jobs}
+
+
+@router.patch("/worker/tooling/update-jobs/{job_id}")
+async def worker_update_tooling_update_job(
+    job_id: str,
+    body: ToolingJobPatch,
+    _: dict[str, str] = Depends(require_worker),
+) -> dict[str, Any]:
+    job = await repo.update_tooling_update_job(job_id, **body.model_dump())
+    if job is None:
+        raise HTTPException(status_code=404, detail="Tooling update job not found")
+    return job

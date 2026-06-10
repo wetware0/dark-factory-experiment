@@ -8,7 +8,7 @@ This log records the assumptions, decisions, and operational constraints used wh
 
 - Fork target: `wetware0/dark-factory-experiment`.
 - Upstream source: `coleam00/dark-factory-experiment`.
-- Working branch: `codex/pave-dark-factory-wetware0`.
+- Current working branch: `codex/c50-guardian-execution`.
 - Remote used for the user's fork: `wetware0`.
 
 ## Repository Identity Decision
@@ -22,9 +22,11 @@ This log records the assumptions, decisions, and operational constraints used wh
 ## PAVE Operating Inputs
 
 - PAVE board name: `Peter's Board`.
-- Staff code for this run: `PWS`.
+- Dark-factory execution staff code: `C50`.
+- Guardian / escalation staff code: `PWS`.
 - Runtime default staff code is configurable through `PAVE_STAFF_CODE`.
-- The worker must still try to detect the staff code belonging to the active ediProd OAuth credentials before claiming work. If detection is unavailable, it must fall back to the configured staff code and mark the MCP readiness state as degraded.
+- Runtime guardian staff code is configurable through `PAVE_GUARDIAN_STAFF_CODE`.
+- The worker must detect the staff code belonging to the active ediProd OAuth credentials before live claim/start. Read-only polling can target `C50` while authenticated as `PWS`, but live mutation is blocked unless OAuth staff matches `C50` or an explicit override is set.
 
 ## Live Tool Constraint Found During Initial Implementation
 
@@ -39,8 +41,11 @@ This log records the assumptions, decisions, and operational constraints used wh
 - `edi` is now available on PATH at `C:\Users\peter\.bun\bin\edi.exe`.
 - `edi staff get` detects the OAuth staff code as `PWS`.
 - A read-only `edi staff tasks PWS --include-capability-pool` probe returned Peter's Board tasks and confirmed no `WRK` task was playing for `PWS` at the time of the probe.
+- A read-only `edi staff get C50` probe confirmed `C50` exists as `Copilot Code Reviewer (C50)`.
+- A read-only `edi staff tasks C50 --include-capability-pool` probe returned zero tasks, zero playing tasks, and zero startable Peter's Board tasks at the time of the probe.
 - The scout can resolve a selected Peter's Board task to a concrete PAVE task ID by using `edi workflow list` and `edi task list` after the cheap staff-task scan.
-- The local scout still defaults to `FACTORY_SCOUT_DRY_RUN=true`. Claim/start mutation through `edi task start` requires explicitly setting `FACTORY_SCOUT_DRY_RUN=false`.
+- The local scout still defaults to `FACTORY_SCOUT_DRY_RUN=true`. Claim/start mutation through `edi task start` requires explicitly setting `FACTORY_SCOUT_DRY_RUN=false` and `FACTORY_ARCHON_EXECUTE=true`.
+- With current `PWS` OAuth credentials, live `C50` mutation is blocked unless `FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true` is explicitly set. The default is fail-closed.
 - Project-local WTG/PAVE skills were added under `.agents/skills` and `.claude/skills`, with `skills-lock.json` recording hashes.
 
 ## Database Decision
@@ -57,9 +62,10 @@ This log records the assumptions, decisions, and operational constraints used wh
 - PAVE remains the driving single source of truth.
 - The scout worker polls PAVE cheaply for startable tasks.
 - The scout only escalates a task to an intelligent agent when no other task is playing for the same staff code.
-- The agent must claim using the PAVE claim function because it is operating through the user's PAVE credentials.
+- This instance polls startable work for `C50`.
+- The agent must claim using the PAVE claim function because lifecycle state belongs in PAVE, not the portal.
 - Only one task may be playing for a staff code at a time. Starting a new task can suspend the existing task, so the scout has to check staff activity before claiming.
-- If the MCP quality iteration close path is unavailable, the agent must suspend the task and assign it to `PWS` rather than attempting a false close.
+- If the MCP quality iteration close path is unavailable, the agent must suspend the task and assign it to guardian `PWS` rather than attempting a false close.
 
 ## MCP And Knowledge Policy
 
@@ -90,3 +96,5 @@ This log records the assumptions, decisions, and operational constraints used wh
 - Skills and plugins are treated as versioned operational dependencies.
 - The dashboard tracks installed versions, latest known versions, update status, and update jobs.
 - Updating skills/plugins from the dashboard is recorded as an auditable operation.
+- Worker-side automated updates are limited to known local git-backed tooling (`C:\git\WTG.sbkb-mcp` and `C:\git\WTG.AI.Prompts`) and use `git pull --ff-only`.
+- OAuth-backed MCP reauthentication is handled through the stalled MCP reauth flow rather than by a tooling update job.
