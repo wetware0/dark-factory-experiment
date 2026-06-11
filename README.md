@@ -63,6 +63,12 @@ The dashboard is served by the Vite app at:
 http://127.0.0.1:5173/factory
 ```
 
+Detailed operating documentation is available in:
+
+- `docs/pave-factory-user-admin-manual.html` - user and administrator manual.
+- `docs/dark-factory-pave-single-source-report.md` - deep architecture and implementation handoff.
+- `docs/pave-factory-implementation-decisions.md` - assumptions and decisions log.
+
 The script creates a worker token at `.factory/factory-worker-token.txt`, stores service PIDs in `.factory/pids`, and writes logs in `.factory/logs`.
 
 Default local operating inputs:
@@ -138,8 +144,9 @@ Important design constraints:
 - A task must not start if starting it would suspend another playing task for the staff code.
 - This instance polls `C50` tasks. `PWS` is the guardian/escalation staff code, not the execution queue.
 - The critic is a normal Archon DAG node.
-- Self-learning is a dedicated PAVE task at the end of the work item or incident lifecycle.
+- Self-learning is a dedicated PAVE task at the end of the work item or incident lifecycle. It is identified by PAVE task type `INT` with `Self Learning` in the task description and routes to `FACTORY_SELF_LEARNING_WORKFLOW_NAME`.
 - Skills/plugins are versioned operational dependencies. The portal tracks installed versions, latest known versions, update status, and update jobs.
+- Archon DAG nodes should declare the skills/plugins they are allowed to use. Claude-backed nodes can use native per-node `skills:`; Codex-backed nodes currently require the factory executor to enforce the allow-list by loading only the nominated skill context.
 - Dashboard tooling update jobs are executed by the worker for known local git-backed tooling (`WTG.sbkb-mcp`, `WTG.AI.Prompts`) using fast-forward pulls. OAuth MCP reauth remains a separate stalled-state action.
 
 ---
@@ -155,7 +162,9 @@ Important design constraints:
 | `app/backend/db/factory_sqlserver_repository.py` | SQL Server factory storage. |
 | `app/frontend/src/pages/FactoryDashboard.tsx` | Central factory dashboard. |
 | `.archon/workflows/pave-dark-factory-execute-task.yaml` | PAVE-native execution workflow. |
+| `.archon/commands/dark-factory-pave-self-learning.md` | Self-learning command contract for dedicated learning tasks. |
 | `.archon/commands/dark-factory-pave-*.md` | Archon command contracts for PAVE execution. |
+| `docs/pave-factory-user-admin-manual.html` | Detailed user and administrator manual. |
 | `docs/dark-factory-pave-single-source-report.md` | Deep implementation handoff report. |
 | `docs/pave-factory-implementation-decisions.md` | Assumptions and decisions log. |
 | `scripts/factory-services.ps1` | Start/stop/status controller. |
@@ -187,19 +196,22 @@ Implemented in this branch:
 
 - PAVE factory portal backend API.
 - SQL Server factory storage path, with Postgres compatibility retained.
-- Scout worker skeleton with fail-closed MCP readiness behavior.
+- Scout worker with fail-closed MCP readiness behavior, stable instance identity, PWS OAuth/C50 execution-staff support, C50 startable-task discovery via the Peter's Board fallback, and dry-run selection recording.
 - Dashboard views for runs, stalled MCPs, tooling currency, artifacts, critic reports, evidence logs, and learning assessments.
 - PAVE-native Archon workflow and command files.
 - Local service controller for start, stop, restart, and status.
+- Tooling page grouping for runtime dependencies versus skill/plugin catalogs.
+- Dedicated self-learning task classification: PAVE task type `INT` with `Self Learning` in the description.
 
 Known live-tool state:
 
 - `ediprod`, `wtgkb`, and `sbkb` are configured in Codex.
-- The callable ediProd MCP mutation namespace was not exposed to this implementation thread.
-- The local `edi` CLI is now installed and detects the current OAuth staff code as `PWS`.
-- A read-only probe confirms `C50` exists as `Copilot Code Reviewer (C50)` and currently has zero returned tasks on `Peter's Board`.
+- The local `edi` CLI is installed and detects the current OAuth staff code as `PWS`.
+- The configured execution staff code is `C50`; `PWS` is the guardian for this instance.
+- Peter's Board fallback discovery can see startable `C50` work even when `edi staff tasks C50` returns no published staff-board view rows.
 - The scout defaults to dry-run. Set `FACTORY_SCOUT_DRY_RUN=false` and `FACTORY_ARCHON_EXECUTE=true` only when the operator wants the scout to call `edi task start` after the play guard and OAuth staff guard both pass.
 - With the current `PWS` OAuth profile, live `C50` mutation is blocked unless `FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true` is explicitly set.
+- The local `C:\git\WTG.AI.Prompts` clone is optional; when absent, the Tooling page reports it as unavailable and workers should use installed project skills plus `wtgkb`/GitHub metadata fallback.
 
 ---
 

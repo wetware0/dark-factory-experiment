@@ -8,10 +8,12 @@ Server footprint without needing pgvector or Postgres full-text features.
 from __future__ import annotations
 
 import asyncio
+import struct
 import json
 import threading
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
 
 import pyodbc
@@ -48,8 +50,27 @@ def _connection_string() -> str:
     return config.FACTORY_SQLSERVER_CONNECTION_STRING
 
 
+def _handle_datetimeoffset(value: bytes) -> datetime:
+    year, month, day, hour, minute, second, fraction, tz_hour, tz_minute = struct.unpack(
+        "<6hI2h",
+        value,
+    )
+    return datetime(
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        fraction // 1000,
+        timezone(timedelta(hours=tz_hour, minutes=tz_minute)),
+    )
+
+
 def _connect() -> pyodbc.Connection:
-    return pyodbc.connect(_connection_string(), autocommit=False)
+    conn = pyodbc.connect(_connection_string(), autocommit=False)
+    conn.add_output_converter(-155, _handle_datetimeoffset)
+    return conn
 
 
 def _to_json(value: Any, default: Json | None = None) -> str:
@@ -103,6 +124,10 @@ def _new_id() -> str:
 
 def _top(limit: int) -> int:
     return max(1, min(int(limit), 5000))
+
+
+def _instance_stale_seconds() -> int:
+    return max(1, int(config.FACTORY_INSTANCE_STALE_SECONDS))
 
 
 def _ensure_schema(conn: pyodbc.Connection) -> None:
@@ -568,7 +593,18 @@ async def resume_instance(instance_id: str) -> dict[str, Any] | None:
 
 async def list_instances() -> list[dict[str, Any]]:
     return await _run(
-        lambda conn: _fetch_all(conn, "SELECT * FROM dbo.factory_instances ORDER BY updated_at DESC")
+        lambda conn: _fetch_all(
+            conn,
+            """
+            SELECT *
+            FROM dbo.factory_instances
+            WHERE last_heartbeat_at >= DATEADD(second, -?, SYSDATETIMEOFFSET())
+               OR is_paused = 1
+               OR status IN ('paused', 'stalled')
+            ORDER BY updated_at DESC
+            """,
+            _instance_stale_seconds(),
+        )
     )
 
 
@@ -620,21 +656,36 @@ async def record_mcp_readiness(
 
 async def list_latest_mcp_readiness(instance_id: str | None = None) -> list[dict[str, Any]]:
     def _sync(conn: pyodbc.Connection) -> list[dict[str, Any]]:
-        params: tuple[Any, ...] = ()
-        where = ""
+        params: list[Any] = []
+        where_parts: list[str] = []
         if instance_id is not None:
-            where = "WHERE instance_id = ?"
-            params = (instance_id,)
+            where_parts.append("m.instance_id = ?")
+            params.append(instance_id)
+        else:
+            where_parts.append(
+                """
+                (
+                    m.instance_id IS NULL
+                    OR i.id IS NULL
+                    OR i.last_heartbeat_at >= DATEADD(second, -?, SYSDATETIMEOFFSET())
+                    OR i.is_paused = 1
+                    OR i.status IN ('paused', 'stalled')
+                )
+                """
+            )
+            params.append(_instance_stale_seconds())
+        where = "WHERE " + " AND ".join(where_parts)
         return _fetch_all(
             conn,
             f"""
             WITH latest AS (
-                SELECT *,
+                SELECT m.*,
                     ROW_NUMBER() OVER (
-                        PARTITION BY ISNULL(instance_id, ''), mcp_name
-                        ORDER BY updated_at DESC
+                        PARTITION BY ISNULL(m.instance_id, ''), m.mcp_name
+                        ORDER BY m.updated_at DESC
                     ) AS rn
-                FROM dbo.factory_mcp_readiness
+                FROM dbo.factory_mcp_readiness m
+                LEFT JOIN dbo.factory_instances i ON i.id = m.instance_id
                 {where}
             )
             SELECT *
@@ -654,12 +705,18 @@ async def list_stalled_mcps() -> list[dict[str, Any]]:
             conn,
             """
             WITH latest AS (
-                SELECT *,
+                SELECT m.*,
                     ROW_NUMBER() OVER (
-                        PARTITION BY ISNULL(instance_id, ''), mcp_name
-                        ORDER BY updated_at DESC
+                        PARTITION BY ISNULL(m.instance_id, ''), m.mcp_name
+                        ORDER BY m.updated_at DESC
                     ) AS rn
-                FROM dbo.factory_mcp_readiness
+                FROM dbo.factory_mcp_readiness m
+                LEFT JOIN dbo.factory_instances i ON i.id = m.instance_id
+                WHERE m.instance_id IS NULL
+                   OR i.id IS NULL
+                   OR i.last_heartbeat_at >= DATEADD(second, -?, SYSDATETIMEOFFSET())
+                   OR i.is_paused = 1
+                   OR i.status IN ('paused', 'stalled')
             )
             SELECT *
             FROM latest
@@ -667,6 +724,7 @@ async def list_stalled_mcps() -> list[dict[str, Any]]:
               AND status IN ('stale', 'unauthenticated', 'unavailable', 'degraded')
             ORDER BY updated_at DESC
             """,
+            _instance_stale_seconds(),
         )
 
     return await _run(_sync)
@@ -1444,10 +1502,21 @@ async def list_tooling_inventory() -> list[dict[str, Any]]:
         lambda conn: _fetch_all(
             conn,
             """
-            SELECT *
-            FROM dbo.factory_tooling_inventory
-            ORDER BY update_available DESC, updated_at DESC, tool_type, name
+            SELECT t.*
+            FROM dbo.factory_tooling_inventory t
+            LEFT JOIN dbo.factory_instances i ON i.id = t.instance_id
+            WHERE t.instance_id IS NULL
+               OR (
+                    i.id IS NOT NULL
+                    AND (
+                        i.last_heartbeat_at >= DATEADD(second, -?, SYSDATETIMEOFFSET())
+                        OR i.is_paused = 1
+                        OR i.status IN ('paused', 'stalled')
+                    )
+               )
+            ORDER BY t.update_available DESC, t.updated_at DESC, t.tool_type, t.name
             """,
+            _instance_stale_seconds(),
         )
     )
 
@@ -1584,33 +1653,59 @@ async def dashboard_summary() -> dict[str, Any]:
             conn,
             """
             SELECT
-                (SELECT COUNT(*) FROM dbo.factory_instances) AS instances_total,
-                (SELECT COUNT(*) FROM dbo.factory_instances WHERE status = 'ready') AS instances_ready,
+                (SELECT COUNT(*) FROM dbo.factory_instances WHERE last_heartbeat_at >= DATEADD(second, -?, SYSDATETIMEOFFSET()) OR is_paused = 1 OR status IN ('paused', 'stalled')) AS instances_total,
+                (SELECT COUNT(*) FROM dbo.factory_instances WHERE status = 'ready' AND last_heartbeat_at >= DATEADD(second, -?, SYSDATETIMEOFFSET())) AS instances_ready,
                 (SELECT COUNT(*) FROM dbo.factory_instances WHERE is_paused = 1 OR status = 'paused') AS instances_paused,
                 (SELECT COUNT(*) FROM dbo.factory_runs WHERE status IN ('queued', 'claimed', 'running')) AS runs_active,
                 (SELECT COUNT(*) FROM dbo.factory_runs WHERE status = 'stalled') AS runs_stalled,
                 (SELECT COUNT(*) FROM dbo.factory_runs WHERE status = 'failed') AS runs_failed,
-                (SELECT COUNT(*) FROM dbo.factory_tooling_inventory WHERE update_available = 1) AS tooling_updates_available,
+                (
+                    SELECT COUNT(*)
+                    FROM dbo.factory_tooling_inventory t
+                    LEFT JOIN dbo.factory_instances i ON i.id = t.instance_id
+                    WHERE t.update_available = 1
+                      AND (
+                        t.instance_id IS NULL
+                        OR (
+                            i.id IS NOT NULL
+                            AND (
+                                i.last_heartbeat_at >= DATEADD(second, -?, SYSDATETIMEOFFSET())
+                                OR i.is_paused = 1
+                                OR i.status IN ('paused', 'stalled')
+                            )
+                        )
+                      )
+                ) AS tooling_updates_available,
                 (SELECT COUNT(*) FROM dbo.factory_learning_assessments WHERE status IN ('pending', 'queued')) AS learning_pending
             """,
+            _instance_stale_seconds(),
+            _instance_stale_seconds(),
+            _instance_stale_seconds(),
         )
         assert row is not None
         stalled = _fetch_all(
             conn,
             """
             WITH latest AS (
-                SELECT *,
+                SELECT m.*,
                     ROW_NUMBER() OVER (
-                        PARTITION BY ISNULL(instance_id, ''), mcp_name
-                        ORDER BY updated_at DESC
+                        PARTITION BY ISNULL(m.instance_id, ''), m.mcp_name
+                        ORDER BY m.updated_at DESC
                     ) AS rn
-                FROM dbo.factory_mcp_readiness
+                FROM dbo.factory_mcp_readiness m
+                LEFT JOIN dbo.factory_instances i ON i.id = m.instance_id
+                WHERE m.instance_id IS NULL
+                   OR i.id IS NULL
+                   OR i.last_heartbeat_at >= DATEADD(second, -?, SYSDATETIMEOFFSET())
+                   OR i.is_paused = 1
+                   OR i.status IN ('paused', 'stalled')
             )
             SELECT *
             FROM latest
             WHERE rn = 1
               AND status IN ('stale', 'unauthenticated', 'unavailable', 'degraded')
             """,
+            _instance_stale_seconds(),
         )
         row["stalled_mcp_count"] = len(stalled)
         return row

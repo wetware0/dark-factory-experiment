@@ -10,12 +10,12 @@ from __future__ import annotations
 import hmac
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from backend import config
-from backend.auth.dependencies import get_current_admin
+from backend.auth.dependencies import get_current_admin, get_current_user
 from backend.db import factory_store as repo
 
 router = APIRouter(prefix="/factory", tags=["factory"])
@@ -231,6 +231,28 @@ async def require_worker(request: Request) -> dict[str, str]:
     }
 
 
+@router.get("/worker/health")
+async def worker_health(_: dict[str, str] = Depends(require_worker)) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "storage_provider": config.FACTORY_STORAGE_PROVIDER,
+        "factory_api_only": config.FACTORY_API_ONLY,
+    }
+
+
+async def require_factory_admin(
+    session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    if config.FACTORY_API_ONLY:
+        return {
+            "id": "factory-local-operator",
+            "email": "factory.local@dark-factory",
+            "is_admin": True,
+        }
+    user = await get_current_user(session=session)
+    return await get_current_admin(user)
+
+
 def _actor_from_user(user: dict[str, Any]) -> tuple[str, str]:
     return ("admin", str(user.get("id") or user.get("email") or "admin"))
 
@@ -363,12 +385,12 @@ async def _build_evidence_report(run_id: str) -> str:
 
 
 @router.get("/dashboard/summary")
-async def dashboard_summary(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def dashboard_summary(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return await repo.dashboard_summary()
 
 
 @router.get("/dashboard/config")
-async def dashboard_config(_: dict[str, Any] = Depends(get_current_admin)) -> FactoryConfigOut:
+async def dashboard_config(_: dict[str, Any] = Depends(require_factory_admin)) -> FactoryConfigOut:
     return FactoryConfigOut(
         board_name=config.PAVE_BOARD_NAME,
         execution_staff_code=config.PAVE_STAFF_CODE,
@@ -379,12 +401,12 @@ async def dashboard_config(_: dict[str, Any] = Depends(get_current_admin)) -> Fa
 
 
 @router.get("/dashboard/stalled")
-async def dashboard_stalled(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def dashboard_stalled(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return {"mcps": await repo.list_stalled_mcps(), "runs": await repo.dashboard_failures()}
 
 
 @router.get("/dashboard/queue")
-async def dashboard_queue(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def dashboard_queue(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     runs = await repo.list_runs(limit=100)
     return {
         "runs": [r for r in runs if r.get("status") in {"queued", "claimed", "running", "stalled"}]
@@ -392,17 +414,17 @@ async def dashboard_queue(_: dict[str, Any] = Depends(get_current_admin)) -> dic
 
 
 @router.get("/dashboard/failures")
-async def dashboard_failures(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def dashboard_failures(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return {"runs": await repo.dashboard_failures()}
 
 
 @router.get("/dashboard/throughput")
-async def dashboard_throughput(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def dashboard_throughput(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return {"days": await repo.dashboard_throughput()}
 
 
 @router.get("/instances")
-async def list_instances(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def list_instances(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return {"instances": await repo.list_instances()}
 
 
@@ -410,7 +432,7 @@ async def list_instances(_: dict[str, Any] = Depends(get_current_admin)) -> dict
 async def pause_instance(
     instance_id: str,
     body: PauseRequest,
-    user: dict[str, Any] = Depends(get_current_admin),
+    user: dict[str, Any] = Depends(require_factory_admin),
 ) -> dict[str, Any]:
     instance = await repo.pause_instance(instance_id, body.reason)
     if instance is None:
@@ -430,7 +452,7 @@ async def pause_instance(
 @router.post("/instances/{instance_id}/resume")
 async def resume_instance(
     instance_id: str,
-    user: dict[str, Any] = Depends(get_current_admin),
+    user: dict[str, Any] = Depends(require_factory_admin),
 ) -> dict[str, Any]:
     instance = await repo.resume_instance(instance_id)
     if instance is None:
@@ -447,14 +469,14 @@ async def resume_instance(
 
 
 @router.get("/mcps/readiness")
-async def mcp_readiness(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def mcp_readiness(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return {"mcps": await repo.list_latest_mcp_readiness()}
 
 
 @router.post("/mcps/reauth")
 async def request_reauth(
     body: ReauthRequest,
-    user: dict[str, Any] = Depends(get_current_admin),
+    user: dict[str, Any] = Depends(require_factory_admin),
 ) -> dict[str, Any]:
     actor_type, actor_id = _actor_from_user(user)
     session = await repo.create_reauth_session(
@@ -476,7 +498,7 @@ async def request_reauth(
 
 
 @router.get("/mcps/reauth")
-async def list_reauth(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def list_reauth(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return {"sessions": await repo.list_reauth_sessions()}
 
 
@@ -484,7 +506,7 @@ async def list_reauth(_: dict[str, Any] = Depends(get_current_admin)) -> dict[st
 async def update_reauth(
     session_id: str,
     body: ReauthUpdateRequest,
-    user: dict[str, Any] = Depends(get_current_admin),
+    user: dict[str, Any] = Depends(require_factory_admin),
 ) -> dict[str, Any]:
     session = await repo.update_reauth_session(session_id, status=body.status, metadata=body.metadata)
     if session is None:
@@ -502,12 +524,12 @@ async def update_reauth(
 
 
 @router.get("/runs")
-async def list_runs(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def list_runs(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return {"runs": await repo.list_runs(limit=100)}
 
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: str, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def get_run(run_id: str, _: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     run = await repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -523,14 +545,14 @@ async def get_run(run_id: str, _: dict[str, Any] = Depends(get_current_admin)) -
 
 @router.get("/runs/{run_id}/events")
 async def get_run_events(
-    run_id: str, _: dict[str, Any] = Depends(get_current_admin)
+    run_id: str, _: dict[str, Any] = Depends(require_factory_admin)
 ) -> dict[str, Any]:
     return {"events": await repo.list_run_events(run_id)}
 
 
 @router.get("/runs/{run_id}/evidence-report", response_class=PlainTextResponse)
 async def evidence_report(
-    run_id: str, _: dict[str, Any] = Depends(get_current_admin)
+    run_id: str, _: dict[str, Any] = Depends(require_factory_admin)
 ) -> PlainTextResponse:
     return PlainTextResponse(await _build_evidence_report(run_id), media_type="text/markdown")
 
@@ -543,7 +565,7 @@ async def worker_evidence_report(
 
 
 @router.get("/tooling")
-async def list_tooling(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def list_tooling(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return {
         "tools": await repo.list_tooling_inventory(),
         "update_jobs": await repo.list_tooling_update_jobs(),
@@ -552,7 +574,7 @@ async def list_tooling(_: dict[str, Any] = Depends(get_current_admin)) -> dict[s
 
 @router.post("/tooling/check-latest")
 async def check_latest_tooling(
-    user: dict[str, Any] = Depends(get_current_admin),
+    user: dict[str, Any] = Depends(require_factory_admin),
 ) -> dict[str, Any]:
     known_tools = [
         {
@@ -613,7 +635,7 @@ async def check_latest_tooling(
 async def update_tooling(
     tool_id: str,
     body: ToolingUpdateRequest,
-    user: dict[str, Any] = Depends(get_current_admin),
+    user: dict[str, Any] = Depends(require_factory_admin),
 ) -> dict[str, Any]:
     tools = await repo.list_tooling_inventory()
     tool = next((item for item in tools if str(item["id"]) == tool_id), None)
@@ -639,7 +661,7 @@ async def update_tooling(
 
 
 @router.get("/learning-assessments")
-async def learning_assessments(_: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+async def learning_assessments(_: dict[str, Any] = Depends(require_factory_admin)) -> dict[str, Any]:
     return {"assessments": await repo.list_learning_assessments()}
 
 
@@ -715,6 +737,28 @@ async def worker_finish_scout_cycle(
     if cycle is None:
         raise HTTPException(status_code=404, detail="Scout cycle not found")
     return cycle
+
+
+@router.get("/worker/runs/active")
+async def worker_find_active_run(
+    pave_task_id: str,
+    include_dry_run: bool = False,
+    _: dict[str, str] = Depends(require_worker),
+) -> dict[str, Any]:
+    runs = await repo.list_runs(limit=500)
+    active_statuses = {"queued", "claimed", "running", "stalled"}
+    if include_dry_run:
+        active_statuses.add("dry_run")
+    active = next(
+        (
+            run
+            for run in runs
+            if str(run.get("pave_task_id") or "").lower() == pave_task_id.lower()
+            and run.get("status") in active_statuses
+        ),
+        None,
+    )
+    return {"run": active}
 
 
 @router.post("/worker/runs")

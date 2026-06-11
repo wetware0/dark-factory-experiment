@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+import httpx
+
+from backend import config
 
 
 class EdiCliError(RuntimeError):
@@ -53,6 +59,8 @@ ZONE_RANK = {
     "four": 4,
     "five": 5,
 }
+
+GLOW_AUTH_COOKIE_PATTERN = re.compile(r"Glow-Auth=[^;]+")
 
 
 def _as_text(value: Any) -> str:
@@ -114,8 +122,80 @@ def normalise_staff_tasks(raw_tasks: list[dict[str, Any]]) -> list[StaffTaskCand
     return [normalise_staff_task(item) for item in raw_tasks]
 
 
+def normalise_board_channel_tasks(
+    board_name: str,
+    staff_code: str,
+    channel_tickets: list[dict[str, Any]],
+) -> list[StaffTaskCandidate]:
+    code = staff_code.upper()
+    rows: list[dict[str, Any]] = []
+    for ticket in channel_tickets:
+        for item in ticket.get("items") or []:
+            if _as_text(item.get("staffCode")).upper() != code:
+                continue
+            task_type = item.get("type") or {}
+            capability = item.get("capability") or {}
+            rows.append(
+                {
+                    "sequence": item.get("sequence"),
+                    "status": item.get("taskStatus"),
+                    "readyToStart": item.get("startable"),
+                    "releasedAt": ticket.get("releaseDateTime"),
+                    "startableAt": ticket.get("startableSince"),
+                    "jobNumber": ticket.get("title"),
+                    "jobTitle": ticket.get("subtitle"),
+                    "boardName": board_name,
+                    "boardZone": ticket.get("zone"),
+                    "type": task_type.get("code"),
+                    "description": item.get("title"),
+                    "capability": capability.get("code"),
+                    "hasNotes": item.get("hasNotes"),
+                    "criticality": ticket.get("criticality"),
+                    "taskId": item.get("key"),
+                    "workflowId": ticket.get("key"),
+                    "source": "glow_board_channel",
+                    "ticket": ticket,
+                    "item": item,
+                }
+            )
+    return normalise_staff_tasks(rows)
+
+
+def normalise_global_playing_tasks(rows: list[dict[str, Any]]) -> list[StaffTaskCandidate]:
+    tasks: list[dict[str, Any]] = []
+    for row in rows:
+        parent_type = _as_text(row.get("P9_ParentTableCode"))
+        parent_id = _as_text(row.get("P9_ParentID"))
+        tasks.append(
+            {
+                "sequence": row.get("P9_Sequence"),
+                "status": row.get("P9_Status"),
+                "readyToStart": False,
+                "releasedAt": "",
+                "startableAt": "",
+                "jobNumber": f"{parent_type}:{parent_id}" if parent_type or parent_id else "",
+                "jobTitle": "",
+                "boardName": "",
+                "boardZone": "",
+                "type": row.get("P9_Type"),
+                "description": row.get("P9_Description"),
+                "capability": row.get("P9_G4_RequiredCapability"),
+                "hasNotes": bool(row.get("P9_Notes")),
+                "taskId": row.get("P9_PK"),
+                "workflowId": row.get("P9_FH_ProcessHeader"),
+                "source": "glow_global_working_guard",
+                "row": row,
+            }
+        )
+    return normalise_staff_tasks(tasks)
+
+
 def find_playing_tasks(tasks: list[StaffTaskCandidate]) -> list[StaffTaskCandidate]:
     return [task for task in tasks if task.status == "WRK"]
+
+
+def is_self_learning_task(task: StaffTaskCandidate) -> bool:
+    return task.task_type == "INT" and "self learning" in task.description.lower()
 
 
 def select_startable_candidate(
@@ -152,6 +232,191 @@ def task_matches_candidate(task: dict[str, Any], candidate: StaffTaskCandidate) 
     if candidate.capability and _as_text(task.get("capability")).upper() != candidate.capability:
         return False
     return _as_bool(task.get("startable")) == candidate.ready_to_start
+
+
+def _odata_string(value: str) -> str:
+    return value.replace("'", "''")
+
+
+class GlowBoardClient:
+    """Read-only Glow calls for PAVE board channels not exposed by the edi CLI."""
+
+    def __init__(self, *, base_url: str | None = None, token_path: str | None = None) -> None:
+        self.base_url = (base_url or config.FACTORY_GLOW_BASE_URL).rstrip("/")
+        configured_token_path = token_path or config.FACTORY_GLOW_TOKEN_PATH
+        self.token_path = (
+            Path(configured_token_path).expanduser()
+            if configured_token_path
+            else Path.home() / ".glow" / "token.json"
+        )
+
+    def _read_token(self) -> str:
+        try:
+            data = json.loads(self.token_path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise EdiCliError(f"Glow token file not found at {self.token_path}; run edi login.") from exc
+        except json.JSONDecodeError as exc:
+            raise EdiCliError(f"Glow token file is invalid JSON at {self.token_path}.") from exc
+        token = _as_text(data.get("authenticationToken"))
+        if not token:
+            raise EdiCliError(f"Glow token file has no authenticationToken at {self.token_path}.")
+        return token
+
+    def _begin_session(self, client: httpx.Client) -> str:
+        response = client.post(
+            "/auth/v2/session/begin",
+            json={
+                "authenticationToken": self._read_token(),
+                "sessionType": "general",
+                "tokenType": 1,
+            },
+        )
+        if response.status_code == 401:
+            raise EdiCliError("Glow token was rejected; run edi login.")
+        if response.status_code >= 400:
+            raise EdiCliError(
+                f"Glow session begin failed: HTTP {response.status_code} {response.text}"
+            )
+        match = GLOW_AUTH_COOKIE_PATTERN.search(response.headers.get("set-cookie", ""))
+        if not match:
+            raise EdiCliError("Glow session begin returned no Glow-Auth cookie.")
+        return match.group(0)
+
+    def _headers(self, cookie: str) -> dict[str, str]:
+        return {"Cookie": cookie, "Accept": "application/json"}
+
+    def _odata(
+        self,
+        client: httpx.Client,
+        cookie: str,
+        entity: str,
+        *,
+        filter_: str,
+        select: list[str] | None = None,
+        top: int | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, str] = {"$filter": filter_}
+        if select:
+            params["$select"] = ",".join(select)
+        if top is not None:
+            params["$top"] = str(top)
+        response = client.get(
+            f"/odata/BufferManagement/{entity}",
+            params=params,
+            headers=self._headers(cookie),
+        )
+        if response.status_code == 401:
+            raise EdiCliError("Glow session expired during board query; run edi login.")
+        if response.status_code >= 400:
+            raise EdiCliError(
+                f"Glow OData query failed for {entity}: HTTP {response.status_code} {response.text}"
+            )
+        data = response.json()
+        rows = data.get("value")
+        return rows if isinstance(rows, list) else []
+
+    def _request_json(
+        self,
+        client: httpx.Client,
+        cookie: str,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> Any:
+        response = client.request(
+            method,
+            path,
+            json=payload,
+            headers={**self._headers(cookie), "Content-Type": "application/json"},
+        )
+        if response.status_code == 401:
+            raise EdiCliError("Glow session expired during board query; run edi login.")
+        if response.status_code >= 400:
+            raise EdiCliError(
+                f"Glow request failed for {method} {path}: HTTP {response.status_code} {response.text}"
+            )
+        return response.json()
+
+    def list_board_channel_tasks(
+        self,
+        *,
+        board_name: str,
+        staff_code: str,
+    ) -> list[StaffTaskCandidate]:
+        with httpx.Client(base_url=self.base_url, timeout=30) as client:
+            cookie = self._begin_session(client)
+            boards = self._odata(
+                client,
+                cookie,
+                "BMBoardConfigurations",
+                filter_=f"BMB_Name eq '{_odata_string(board_name)}'",
+            )
+            if not boards:
+                return []
+            board_id = _as_text(boards[0].get("BMB_PK"))
+            if not board_id:
+                return []
+            section = self._request_json(
+                client,
+                cookie,
+                "GET",
+                f"/pave/boards/{board_id}/main-section",
+            )
+            section_id = _as_text(section.get("sectionId"))
+            if not section_id:
+                return []
+            channels = self._request_json(
+                client,
+                cookie,
+                "POST",
+                f"/pave/channels/{section_id}",
+                payload={"staffCodes": [staff_code]},
+            )
+            if not isinstance(channels, list):
+                return []
+            channel = next(
+                (
+                    item
+                    for item in channels
+                    if _as_text(item.get("code")).upper() == staff_code.upper()
+                ),
+                None,
+            )
+            tickets = channel.get("tickets") if isinstance(channel, dict) else None
+            return normalise_board_channel_tasks(
+                board_name,
+                staff_code,
+                tickets if isinstance(tickets, list) else [],
+            )
+
+    def list_global_playing_tasks(self, *, staff_code: str) -> list[StaffTaskCandidate]:
+        with httpx.Client(base_url=self.base_url, timeout=30) as client:
+            cookie = self._begin_session(client)
+            rows = self._odata(
+                client,
+                cookie,
+                "BMWorkflowTasks",
+                filter_=(
+                    f"P9_GS_NKAssignedStaffMember eq '{_odata_string(staff_code)}' "
+                    "and P9_Status eq 'WRK' and P9_IsPublished eq true and P9_IsValid eq true"
+                ),
+                select=[
+                    "P9_PK",
+                    "P9_FH_ProcessHeader",
+                    "P9_FH_JobWorkflow",
+                    "P9_ParentTableCode",
+                    "P9_ParentID",
+                    "P9_Sequence",
+                    "P9_Type",
+                    "P9_Description",
+                    "P9_G4_RequiredCapability",
+                    "P9_Status",
+                    "P9_Notes",
+                ],
+                top=1000,
+            )
+            return normalise_global_playing_tasks(rows)
 
 
 class EdiCli:
@@ -221,6 +486,15 @@ class EdiCli:
             args.append("--include-capability-pool")
         return normalise_staff_tasks(self._run_json_array(args, timeout=60))
 
+    def list_board_channel_tasks(self, *, board_name: str, staff_code: str) -> list[StaffTaskCandidate]:
+        return GlowBoardClient().list_board_channel_tasks(
+            board_name=board_name,
+            staff_code=staff_code,
+        )
+
+    def list_global_playing_tasks(self, staff_code: str) -> list[StaffTaskCandidate]:
+        return GlowBoardClient().list_global_playing_tasks(staff_code=staff_code)
+
     def list_workflow_ids(self, job_number: str) -> list[str]:
         rows = self._run_json_array(
             ["--format", "json", "--fields", "workflowId", "workflow", "list", job_number],
@@ -249,6 +523,13 @@ class EdiCli:
         )
 
     def resolve_task(self, candidate: StaffTaskCandidate) -> ResolvedTask | None:
+        direct_task_id = _as_text(candidate.raw.get("taskId"))
+        if direct_task_id:
+            return ResolvedTask(
+                task_id=direct_task_id,
+                workflow_id=_as_text(candidate.raw.get("workflowId")),
+                raw=candidate.raw,
+            )
         matches: list[ResolvedTask] = []
         for workflow_id in self.list_workflow_ids(candidate.job_number):
             for task in self.list_active_tasks(workflow_id):

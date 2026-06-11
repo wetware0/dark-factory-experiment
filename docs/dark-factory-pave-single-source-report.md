@@ -48,8 +48,9 @@ Current live-tool finding:
 - `codex mcp list` reports `ediprod`, `wtgkb`, and `sbkb` are configured.
 - The callable `ediprod` MCP mutation namespace was not exposed to this implementation thread.
 - The local `edi` CLI fallback is now installed.
-- A read-only smoke test detected the OAuth staff code as `PWS`, confirmed `C50` exists as `Copilot Code Reviewer (C50)`, and found zero returned tasks for `C50`.
-- The scout now uses `edi staff tasks C50 --include-capability-pool` for cheap polling and `edi workflow list` / `edi task list` for task ID resolution. It remains dry-run by default and only calls `edi task start` when `FACTORY_SCOUT_DRY_RUN=false`, `FACTORY_ARCHON_EXECUTE=true`, the play guard passes, and the OAuth staff guard permits live mutation.
+- A read-only smoke test detected the OAuth staff code as `PWS` and confirmed `C50` exists as `Copilot Code Reviewer (C50)`.
+- Direct `edi staff tasks C50` polling can return no rows when the staff-board view is not published for the OAuth subject. The scout therefore uses the Peter's Board channel fallback to find startable `C50` work, then resolves direct PAVE task IDs from the board payload or active workflow task lists.
+- The scout remains dry-run by default and only calls `edi task start` when `FACTORY_SCOUT_DRY_RUN=false`, `FACTORY_ARCHON_EXECUTE=true`, the play guard passes, and the OAuth staff guard permits live mutation.
 - For this dark-factory instance, `C50` is the execution staff code and `PWS` is the guardian staff code. Current `PWS` OAuth credentials can inspect `C50` tasks but cannot live-start `C50` work unless `FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true` is explicitly set.
 
 Local service commands:
@@ -316,6 +317,8 @@ This two-tier design keeps token use bounded and protects the staff code from ac
 The critic must be a normal Archon DAG node. It should run after generated artifacts exist and before final reporting or task completion. It is allowed to block, request a fix-loop, or escalate to human review. It should not be implemented as a portal-only status, a separate polling loop, or a post-hoc summary that cannot affect the run.
 
 The self-learning loop is different. It should be represented by a dedicated PAVE task at the end of the work item or incident, after the generated artifact has been used, accepted, modified, rejected, or superseded. That task assesses whether the artifact was used as generated. If humans or downstream agents made manual changes, those differences become learning candidates and are captured in the WTG Second Brain through `sbkb` according to the writeback policy.
+
+The canonical PAVE shape for that task is task type `INT` with `Self Learning` in the task description.
 
 This separation matters:
 
@@ -1714,7 +1717,7 @@ Each intelligent agent instance should:
 
 Self-learning executor instances are specialized intelligent agents. They should:
 
-1. Accept only a dedicated self-learning PAVE task.
+1. Accept only a dedicated self-learning PAVE task: task type `INT` and description containing `Self Learning`.
 2. Load the original run artifacts and final accepted/used artifact.
 3. Compare generated output with manual or downstream changes.
 4. Create a self-learning assessment artifact.
@@ -1735,6 +1738,7 @@ FACTORY_INSTANCE_ROLE=scout|executor|combined
 FACTORY_AGENT_LABEL=codex-worker/...
 FACTORY_ARCHON_CWD=C:\git\dark-factory-experiment
 FACTORY_ARCHON_WORKFLOW=pave-dark-factory-execute-task
+FACTORY_SELF_LEARNING_WORKFLOW_NAME=pave-dark-factory-self-learning
 FACTORY_REPO_ROOTS=C:\git\CargoWise;C:\git\CargoWise.Customs;C:\git\CargoWise.*
 FACTORY_REPO_DISCOVERY_MODE=explicit|glob|pave_metadata
 CARGOWISE_PRIMARY_REPO=C:\git\CargoWise
@@ -2051,6 +2055,14 @@ The knowledge bundle should record:
 
 Do not bulk-load the whole WTG.AI.Prompts repository. Select phase-specific plugins/skills and record the decision.
 
+The DAG contract should model skills as a per-node allow-list. A node may nominate one or more skills/plugins from the installed project catalog, the operator-approved marketplace/plugin catalog, or WTG.AI.Prompts-derived sources. The resolver may suggest skills, but the node declaration is the control boundary for what that node is allowed to use.
+
+Provider behavior must be explicit:
+
+- Claude-backed Archon prompt/command nodes can pass nominated skills through the native `skills:` field.
+- Codex-backed nodes currently discover skills globally. Until Codex exposes hard per-node skill injection/restriction, the factory executor must enforce the allow-list by only loading nominated skill content into the node context, recording the selected skills as evidence, and flagging hard-isolation gaps in the run metadata.
+- Bash, script, approval, cancel, and loop nodes must not be treated as having effective skill injection unless the underlying Archon provider documents support for it.
+
 Observed relevant plugin families:
 
 ```text
@@ -2092,6 +2104,7 @@ Skill resolver requirements:
 
 - Input: PAVE job metadata, task type, repo path, changed files, current phase, and available prompt sources.
 - Output: ordered skill list with source, plugin, skill name/ref, reason, and visibility.
+- Control: each Archon DAG node stores its allowed skill list; the resolver can choose within that list but cannot add broader skills at execution time without a recorded workflow/config update.
 - Fallback: if local `C:\git\WTG.AI.Prompts` is missing, fetch skill metadata through `wtgkb` or GitHub CLI/API.
 - Persistence: write `$ARTIFACTS_DIR/skills-used.json`, `factory_skill_invocations`, and a short section in the final report.
 - Safety: never let skill selection override the PAVE contract or the repo's local rules.
@@ -2908,8 +2921,8 @@ These need owner decisions before coding:
    - What score threshold should block completion?
    - How many critic fix-loop attempts are allowed before human escalation?
    - Which critic findings must be visible in PAVE versus portal-only artifacts?
-15. Self-learning task shape:
-   - What PAVE task type/code should represent end-of-WI self-learning?
+15. Self-learning routing:
+   - Accepted task shape: task type `INT` with `Self Learning` in the description.
    - Which workflow template should create that task?
    - Should the self-learning task be assigned to the same staff code, a learning capability, or a separate agent identity?
 16. SBKB writeback:

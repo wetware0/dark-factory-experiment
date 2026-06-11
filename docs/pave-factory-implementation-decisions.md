@@ -86,6 +86,7 @@ This log records the assumptions, decisions, and operational constraints used wh
 - The runtime stores repository participation, branch names, commit SHAs, PR URLs, build/test results, and per-repo artifacts for each PAVE run.
 - Critic is modeled as a normal DAG node.
 - Self-learning is modeled as a dedicated PAVE task after the work item, not as an implicit hidden phase.
+- The dedicated self-learning task is identified by PAVE task type `INT` with `Self Learning` in the task description.
 
 ## Audit And Evidence Policy
 
@@ -97,7 +98,9 @@ This log records the assumptions, decisions, and operational constraints used wh
 ## Tooling Currency Policy
 
 - Skills and plugins are treated as versioned operational dependencies.
+- The dashboard separates runtime dependencies (`ediprod`, `wtgkb`, `sbkb`, CLI/runtime tooling) from skill/plugin catalogs. `WTG.AI.Prompts` is a catalog/source, not a skill to bulk-load into every node.
 - The dashboard tracks installed versions, latest known versions, update status, and update jobs.
 - Updating skills/plugins from the dashboard is recorded as an auditable operation.
 - Worker-side automated updates are limited to known local git-backed tooling (`C:\git\WTG.sbkb-mcp` and `C:\git\WTG.AI.Prompts`) and use `git pull --ff-only`.
 - OAuth-backed MCP reauthentication is handled through the stalled MCP reauth flow rather than by a tooling update job.
+- Archon DAG nodes declare the skill allow-list they are permitted to use. Claude-backed nodes can pass this through the native `skills:` field. Codex-backed nodes currently discover skills globally, so the factory executor must enforce the allow-list by selecting only the nominated skill context for the node, recording the selected skills in `factory_skill_invocations`, and treating unsupported hard isolation as a provider capability gap.

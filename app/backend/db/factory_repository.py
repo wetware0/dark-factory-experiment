@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend import config
 from backend.db.postgres import get_pg_pool
 
 Json = dict[str, Any] | list[Any]
@@ -53,6 +54,10 @@ def _row_to_dict(row: Any | None) -> dict[str, Any] | None:
 
 def _rows_to_dicts(rows: list[Any]) -> list[dict[str, Any]]:
     return [row for r in rows if (row := _row_to_dict(r)) is not None]
+
+
+def _instance_stale_seconds() -> int:
+    return max(1, int(config.FACTORY_INSTANCE_STALE_SECONDS))
 
 
 async def upsert_instance(
@@ -1019,10 +1024,21 @@ async def list_tooling_inventory() -> list[dict[str, Any]]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT *
-            FROM factory_tooling_inventory
-            ORDER BY update_available DESC, updated_at DESC, tool_type, name
-            """
+            SELECT t.*
+            FROM factory_tooling_inventory t
+            LEFT JOIN factory_instances i ON i.id = t.instance_id
+            WHERE t.instance_id IS NULL
+               OR (
+                    i.id IS NOT NULL
+                    AND (
+                        i.last_heartbeat_at >= now() - ($1 * interval '1 second')
+                        OR i.is_paused
+                        OR i.status IN ('paused', 'stalled')
+                    )
+               )
+            ORDER BY t.update_available DESC, t.updated_at DESC, t.tool_type, t.name
+            """,
+            _instance_stale_seconds(),
         )
     return _rows_to_dicts(rows)
 
@@ -1148,11 +1164,27 @@ async def dashboard_summary() -> dict[str, Any]:
                     AS runs_active,
                 (SELECT count(*) FROM factory_runs WHERE status = 'stalled') AS runs_stalled,
                 (SELECT count(*) FROM factory_runs WHERE status = 'failed') AS runs_failed,
-                (SELECT count(*) FROM factory_tooling_inventory WHERE update_available)
-                    AS tooling_updates_available,
+                (
+                    SELECT count(*)
+                    FROM factory_tooling_inventory t
+                    LEFT JOIN factory_instances i ON i.id = t.instance_id
+                    WHERE t.update_available
+                      AND (
+                        t.instance_id IS NULL
+                        OR (
+                            i.id IS NOT NULL
+                            AND (
+                                i.last_heartbeat_at >= now() - ($1 * interval '1 second')
+                                OR i.is_paused
+                                OR i.status IN ('paused', 'stalled')
+                            )
+                        )
+                      )
+                ) AS tooling_updates_available,
                 (SELECT count(*) FROM factory_learning_assessments WHERE status IN ('pending', 'queued'))
                     AS learning_pending
-            """
+            """,
+            _instance_stale_seconds(),
         )
     data = _row_to_dict(row)
     assert data is not None

@@ -10,19 +10,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
 import sys
 import time
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -31,6 +33,7 @@ from backend.factory.edi_cli import (
     EdiCli,
     EdiCliError,
     find_playing_tasks,
+    is_self_learning_task,
     select_startable_candidate,
 )
 
@@ -152,6 +155,42 @@ def _git_remote_head(path: str) -> tuple[str | None, str]:
     if not first:
         return (None, "remote HEAD not found")
     return (first[:12], f"origin {remote.stdout.strip()}")
+
+
+def _project_skill_catalog() -> tuple[str | None, str, dict[str, Any]]:
+    lock_path = REPO_ROOT / "skills-lock.json"
+    if not lock_path.exists():
+        return (
+            None,
+            "skills-lock.json not found",
+            {"lock_path": str(lock_path), "skills": []},
+        )
+    try:
+        raw = lock_path.read_bytes()
+        data = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return (
+            None,
+            f"failed to read skills-lock.json: {exc}",
+            {"lock_path": str(lock_path), "skills": []},
+        )
+    skills = sorted((data.get("skills") or {}).keys())
+    version = hashlib.sha256(raw).hexdigest()[:12]
+    return (
+        version,
+        f"{len(skills)} locked project skills",
+        {
+            "lock_path": str(lock_path),
+            "skills": skills,
+            "lock_version": data.get("version"),
+        },
+    )
+
+
+def _stable_instance_id(*, board_name: str, staff_code: str) -> str:
+    raw = f"{socket.gethostname()}-{staff_code}-{board_name}".lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    return f"factory-{slug or 'worker'}"
 
 
 def _probe_mcp_configured(name: str, codex_output: str) -> tuple[bool, str]:
@@ -360,6 +399,7 @@ def collect_tooling_inventory(instance_id: str) -> list[dict[str, Any]]:
     sbkb_latest, sbkb_latest_detail = _git_remote_head("C:/git/WTG.sbkb-mcp")
     prompts_head, prompts_detail = _git_head("C:/git/WTG.AI.Prompts")
     prompts_latest, prompts_latest_detail = _git_remote_head("C:/git/WTG.AI.Prompts")
+    skill_catalog_version, skill_catalog_detail, skill_catalog_metadata = _project_skill_catalog()
     second_brain_exists = Path("C:/git/SecondBrain").exists()
     records = [
         {
@@ -412,6 +452,20 @@ def collect_tooling_inventory(instance_id: str) -> list[dict[str, Any]]:
         },
         {
             "instance_id": instance_id,
+            "tool_type": "skill_catalog",
+            "name": "Project skills",
+            "installed_version": skill_catalog_version,
+            "latest_version": None,
+            "status": "present" if skill_catalog_version else "missing",
+            "source_url": "skills-lock.json",
+            "update_available": False,
+            "metadata": {
+                "detail": skill_catalog_detail,
+                **skill_catalog_metadata,
+            },
+        },
+        {
+            "instance_id": instance_id,
             "tool_type": "prompt_repo",
             "name": "WTG.AI.Prompts",
             "installed_version": prompts_head,
@@ -429,12 +483,21 @@ def collect_tooling_inventory(instance_id: str) -> list[dict[str, Any]]:
 
 async def wait_for_backend(api: FactoryApi, timeout_seconds: int = 60) -> None:
     deadline = time.monotonic() + timeout_seconds
+    headers = {
+        "X-Factory-Worker-Token": api.token,
+        "X-Factory-Instance-Id": api.instance_id,
+    }
     while time.monotonic() < deadline:
         try:
             async with httpx.AsyncClient(base_url=api.base_url, timeout=5) as client:
-                response = await client.get("/health")
-                if response.status_code < 500:
+                response = await client.get("/factory/worker/health", headers=headers)
+                if response.status_code == 200:
                     return
+                if response.status_code in {401, 403, 503}:
+                    raise RuntimeError(
+                        "Factory backend is reachable but worker authentication is not ready: "
+                        f"HTTP {response.status_code} {response.text}"
+                    )
         except httpx.HTTPError:
             await asyncio.sleep(2)
     raise RuntimeError(f"Factory backend did not become reachable at {api.base_url}")
@@ -597,7 +660,9 @@ def _write_json_artifact(run_id: str, name: str, payload: dict[str, Any]) -> Pat
     return path
 
 
-def _dispatch_archon_workflow(run_id: str, handoff: dict[str, Any]) -> ArchonDispatchResult:
+def _dispatch_archon_workflow(
+    run_id: str, handoff: dict[str, Any], *, workflow_name: str
+) -> ArchonDispatchResult:
     handoff_path = _write_json_artifact(run_id, "pave-task-handoff.json", handoff)
     if not config.FACTORY_ARCHON_EXECUTE:
         return ArchonDispatchResult(
@@ -628,7 +693,7 @@ def _dispatch_archon_workflow(run_id: str, handoff: dict[str, Any]) -> ArchonDis
         archon,
         "workflow",
         "run",
-        config.FACTORY_ARCHON_WORKFLOW_NAME,
+        workflow_name,
         "--cwd",
         str(REPO_ROOT),
         "--detach",
@@ -941,14 +1006,54 @@ async def scout_once(
         return
 
     edi = EdiCli()
+    discovery_sources = ["edi_staff_tasks"]
+    fallback_error = ""
     tasks = edi.list_staff_tasks(
         staff_code,
         include_capability_pool=config.FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL,
     )
+    if config.FACTORY_PAVE_BOARD_CHANNEL_FALLBACK:
+        try:
+            global_playing_tasks = edi.list_global_playing_tasks(staff_code)
+            board_channel_tasks = edi.list_board_channel_tasks(
+                board_name=board_name,
+                staff_code=staff_code,
+            )
+            seen_task_ids = {
+                str(task.raw.get("taskId") or task.raw.get("id") or "").lower()
+                for task in tasks
+            }
+            for task in [*global_playing_tasks, *board_channel_tasks]:
+                task_id = str(task.raw.get("taskId") or task.raw.get("id") or "").lower()
+                if task_id and task_id in seen_task_ids:
+                    continue
+                if task_id:
+                    seen_task_ids.add(task_id)
+                tasks.append(task)
+            discovery_sources.append("glow_board_channel")
+        except EdiCliError as exc:
+            fallback_error = str(exc)
+
     playing_tasks = find_playing_tasks(tasks)
     board_candidates = [
         task for task in tasks if task.board_name == board_name and task.ready_to_start
     ]
+
+    if fallback_error and not tasks:
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "stalled",
+                "decision": "board_channel_poll_failed",
+                "summary": f"Could not query PAVE board channel fallback: {fallback_error}",
+                "candidate_count": 0,
+                "output_snapshot": {
+                    "discovery_sources": discovery_sources,
+                    "fallback_error": fallback_error,
+                },
+            },
+        )
+        return
 
     if playing_tasks:
         await api.patch(
@@ -959,6 +1064,8 @@ async def scout_once(
                 "summary": f"{staff_code} already has {len(playing_tasks)} playing PAVE task(s).",
                 "candidate_count": len(board_candidates),
                 "output_snapshot": {
+                    "discovery_sources": discovery_sources,
+                    "fallback_error": fallback_error,
                     "playing_tasks": [task.raw for task in playing_tasks],
                     "board_candidates": [task.raw for task in board_candidates[:10]],
                 },
@@ -976,6 +1083,8 @@ async def scout_once(
                 "summary": f"No ready-to-start tasks found on {board_name} for {staff_code}.",
                 "candidate_count": 0,
                 "output_snapshot": {
+                    "discovery_sources": discovery_sources,
+                    "fallback_error": fallback_error,
                     "task_count": len(tasks),
                     "board_candidate_count": len(board_candidates),
                 },
@@ -996,6 +1105,8 @@ async def scout_once(
                 ),
                 "candidate_count": len(board_candidates),
                 "output_snapshot": {
+                    "discovery_sources": discovery_sources,
+                    "fallback_error": fallback_error,
                     "candidate": candidate.raw,
                     "resolution": "no_unique_match",
                 },
@@ -1015,6 +1126,8 @@ async def scout_once(
             ),
             "candidate_count": len(board_candidates),
             "output_snapshot": {
+                "discovery_sources": discovery_sources,
+                "fallback_error": fallback_error,
                 "dry_run": config.FACTORY_SCOUT_DRY_RUN,
                 "candidate": candidate.raw,
                 "resolved_task": {
@@ -1024,6 +1137,68 @@ async def scout_once(
                 },
             },
         },
+    )
+
+    active_run = await api.get(
+        f"/factory/worker/runs/active?pave_task_id={quote(resolved.task_id)}"
+        f"&include_dry_run={str(config.FACTORY_SCOUT_DRY_RUN).lower()}"
+    )
+    existing_run = active_run.get("run") if isinstance(active_run, dict) else None
+    if existing_run:
+        existing_metadata = existing_run.get("metadata") or {}
+        if (
+            config.FACTORY_SCOUT_DRY_RUN
+            and existing_run.get("status") == "queued"
+            and existing_metadata.get("dry_run") is True
+        ):
+            await api.patch(
+                f"/factory/worker/runs/{existing_run['id']}",
+                {
+                    "status": "dry_run",
+                    "phase": "scout_dry_run",
+                    "metadata": {
+                        "status_correction": (
+                            "Dry-run scout selections are not execution queue items."
+                        )
+                    },
+                },
+            )
+        await api.patch(
+            f"/factory/worker/scout-cycles/{cycle['id']}",
+            {
+                "status": "ready",
+                "selected_pave_task_id": resolved.task_id,
+                "decision": "selected_task_already_queued",
+                "summary": (
+                    f"Selected {candidate.job_number} / {candidate.task_type}, "
+                    f"but active run {existing_run['id']} already exists."
+                ),
+                "candidate_count": len(board_candidates),
+                "output_snapshot": {
+                    "discovery_sources": discovery_sources,
+                    "fallback_error": fallback_error,
+                    "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+                    "candidate": candidate.raw,
+                    "existing_run": existing_run,
+                },
+            },
+        )
+        return
+
+    task_kind = "self_learning" if is_self_learning_task(candidate) else "delivery"
+    selected_workflow_name = (
+        config.FACTORY_SELF_LEARNING_WORKFLOW_NAME
+        if task_kind == "self_learning"
+        else config.FACTORY_ARCHON_WORKFLOW_NAME
+    )
+    initial_phase = (
+        "self_learning_dry_run"
+        if config.FACTORY_SCOUT_DRY_RUN and task_kind == "self_learning"
+        else "scout_dry_run"
+        if config.FACTORY_SCOUT_DRY_RUN
+        else "self_learning_handoff"
+        if task_kind == "self_learning"
+        else "scout_handoff"
     )
 
     run = await api.post(
@@ -1036,12 +1211,17 @@ async def scout_once(
             "pave_task_title": f"{candidate.job_number} / {candidate.task_type}: {candidate.description}",
             "pave_board_name": board_name,
             "staff_code": staff_code,
-            "status": "queued",
-            "phase": "scout_handoff",
+            "status": "dry_run" if config.FACTORY_SCOUT_DRY_RUN else "queued",
+            "phase": initial_phase,
             "workflow_id": resolved.workflow_id,
-            "workflow_name": config.FACTORY_ARCHON_WORKFLOW_NAME,
+            "workflow_name": selected_workflow_name,
             "metadata": {
                 "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+                "task_kind": task_kind,
+                "self_learning_task": task_kind == "self_learning",
+                "self_learning_rule": "type INT and description contains 'Self Learning'",
+                "discovery_sources": discovery_sources,
+                "fallback_error": fallback_error,
                 "candidate": candidate.raw,
                 "resolved_task": resolved.raw,
                 "guardian_staff_code": guardian_staff_code,
@@ -1054,9 +1234,14 @@ async def scout_once(
         "board_name": board_name,
         "execution_staff_code": staff_code,
         "guardian_staff_code": guardian_staff_code,
-        "workflow_name": config.FACTORY_ARCHON_WORKFLOW_NAME,
+        "workflow_name": selected_workflow_name,
         "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+        "task_kind": task_kind,
+        "self_learning_task": task_kind == "self_learning",
+        "self_learning_rule": "type INT and description contains 'Self Learning'",
         "candidate": candidate.raw,
+        "discovery_sources": discovery_sources,
+        "fallback_error": fallback_error,
         "resolved_task": {
             "task_id": resolved.task_id,
             "workflow_id": resolved.workflow_id,
@@ -1075,17 +1260,23 @@ async def scout_once(
         {
             "instance_id": api.instance_id,
             "level": "info",
-            "phase": "scout_handoff",
+            "phase": initial_phase,
             "message": (
-                "Scout selected a startable PAVE task in dry-run mode."
+                "Scout selected a dedicated PAVE self-learning task in dry-run mode."
+                if config.FACTORY_SCOUT_DRY_RUN and task_kind == "self_learning"
+                else "Scout selected a startable PAVE task in dry-run mode."
                 if config.FACTORY_SCOUT_DRY_RUN
+                else "Scout selected a dedicated PAVE self-learning task and prepared live handoff."
+                if task_kind == "self_learning"
                 else "Scout selected a startable PAVE task and prepared live handoff."
             ),
             "payload": {
                 "dry_run": config.FACTORY_SCOUT_DRY_RUN,
+                "task_kind": task_kind,
                 "candidate": candidate.raw,
                 "resolved_task_id": resolved.task_id,
                 "workflow_id": resolved.workflow_id,
+                "workflow_name": selected_workflow_name,
                 "handoff_path": str(handoff_path),
             },
         },
@@ -1093,8 +1284,12 @@ async def scout_once(
     await api.post(
         f"/factory/worker/runs/{run['id']}/artifacts",
         {
-            "category": "Specs",
-            "name": "PAVE scout handoff",
+            "category": "Self Learning" if task_kind == "self_learning" else "Specs",
+            "name": (
+                "PAVE self-learning handoff"
+                if task_kind == "self_learning"
+                else "PAVE scout handoff"
+            ),
             "status": "created",
             "content_type": "application/json",
             "summary": f"{candidate.job_number} / {candidate.task_type}: {candidate.description}",
@@ -1102,6 +1297,8 @@ async def scout_once(
                 "candidate": candidate.raw,
                 "resolved_task_id": resolved.task_id,
                 "workflow_id": resolved.workflow_id,
+                "workflow_name": selected_workflow_name,
+                "task_kind": task_kind,
                 "guardian_staff_code": guardian_staff_code,
                 "handoff_path": str(handoff_path),
                 "dry_run": config.FACTORY_SCOUT_DRY_RUN,
@@ -1280,12 +1477,18 @@ async def scout_once(
         },
     )
 
-    dispatch = _dispatch_archon_workflow(run["id"], handoff)
+    dispatch = _dispatch_archon_workflow(
+        run["id"], handoff, workflow_name=selected_workflow_name
+    )
     await api.post(
         f"/factory/worker/runs/{run['id']}/artifacts",
         {
-            "category": "Coding",
-            "name": "Archon workflow dispatch",
+            "category": "Self Learning" if task_kind == "self_learning" else "Coding",
+            "name": (
+                "Archon self-learning workflow dispatch"
+                if task_kind == "self_learning"
+                else "Archon workflow dispatch"
+            ),
             "status": dispatch.status,
             "content_type": "application/json",
             "summary": dispatch.detail,
@@ -1357,7 +1560,7 @@ async def run_loop(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the PAVE Dark Factory scout worker.")
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
-    parser.add_argument("--instance-id", default=config.FACTORY_INSTANCE_ID or f"factory-{uuid.uuid4()}")
+    parser.add_argument("--instance-id", default="")
     parser.add_argument("--board-name", default=config.PAVE_BOARD_NAME)
     parser.add_argument("--staff-code", default=config.PAVE_STAFF_CODE)
     parser.add_argument("--guardian-staff-code", default=config.PAVE_GUARDIAN_STAFF_CODE)
@@ -1376,7 +1579,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--escalation-job-number", help="Optional WI/CS/PRJ number for the escalation.")
     parser.add_argument("--upload-evidence-run-id", help="Upload a run evidence report to eDoc and exit.")
     parser.add_argument("--upload-evidence-job-number", help="WI/CS/PRJ number for eDoc upload.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.instance_id:
+        args.instance_id = config.FACTORY_INSTANCE_ID or _stable_instance_id(
+            board_name=args.board_name,
+            staff_code=args.staff_code,
+        )
+    return args
 
 
 async def main() -> None:

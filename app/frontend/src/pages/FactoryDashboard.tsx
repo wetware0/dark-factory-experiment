@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
 import {
@@ -65,7 +65,7 @@ function statusClass(status: string) {
 function StatusPill({ status }: { status: string }) {
   return (
     <span className={`inline-flex items-center border px-2 py-0.5 text-xs ${statusClass(status)}`}>
-      {status}
+      {formatRunState(status)}
     </span>
   );
 }
@@ -73,6 +73,99 @@ function StatusPill({ status }: { status: string }) {
 function formatTime(value?: string | null) {
   if (!value) return '-';
   return value.slice(0, 19).replace('T', ' ');
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+}
+
+function formatRunState(value?: string | null) {
+  return (value || '-').replace(/_/g, ' ');
+}
+
+const skillCatalogToolTypes = new Set(['skill', 'plugin', 'skill_catalog', 'plugin_catalog', 'prompt_repo']);
+
+function toolingKey(tool: FactoryTool) {
+  return `${tool.tool_type}:${tool.name}`.toLowerCase();
+}
+
+function visibleToolingRows(tools: FactoryTool[]) {
+  const instanceKeys = new Set(
+    tools.filter((tool) => tool.instance_id).map((tool) => toolingKey(tool)),
+  );
+  return tools.filter((tool) => tool.instance_id || !instanceKeys.has(toolingKey(tool)));
+}
+
+function formatToolType(value: string) {
+  return value.replace(/_/g, ' ');
+}
+
+function formatToolScope(tool: FactoryTool) {
+  if (!tool.instance_id) return 'Global';
+  return tool.instance_id.replace(/^factory-/, '').replace(/-/g, ' ');
+}
+
+function formatToolDetail(tool: FactoryTool) {
+  const detail = asText(asRecord(tool.metadata).detail);
+  return [tool.source_url, detail].filter(Boolean).join(' / ') || '-';
+}
+
+function taskTypeCode(value: unknown): string {
+  if (typeof value === 'string') return value;
+  const record = asRecord(value);
+  return asText(record.code);
+}
+
+function getRunTaskInfo(run: FactoryRun) {
+  const metadata = asRecord(run.metadata);
+  const candidate = asRecord(metadata.candidate);
+  const resolved = asRecord(metadata.resolved_task);
+  const item = asRecord(candidate.item);
+  const ticket = asRecord(candidate.ticket);
+  const itemType = asRecord(item.type);
+
+  const jobNumber =
+    run.pave_work_item_id ||
+    run.pave_incident_id ||
+    asText(candidate.jobNumber) ||
+    asText(ticket.title) ||
+    '-';
+  const jobTitle = asText(candidate.jobTitle) || asText(ticket.subtitle);
+  const taskCode = asText(candidate.type) || taskTypeCode(item.type) || asText(itemType.code) || '-';
+  const taskTypeDescription = asText(itemType.description);
+  const description =
+    asText(candidate.description) ||
+    asText(item.title) ||
+    run.pave_task_title.replace(/^[^:]+:\s*/, '') ||
+    '-';
+  const status =
+    asText(item.status) ||
+    asText(candidate.status) ||
+    asText(item.taskStatus) ||
+    asText(resolved.status) ||
+    '-';
+  const rawStatus = asText(item.taskStatus) || asText(candidate.status);
+  const sequence = asText(candidate.sequence) || asText(item.sequence);
+  const zone = asText(candidate.boardZone) || asText(ticket.zone);
+  const board = asText(candidate.boardName) || run.pave_board_name;
+
+  return {
+    board,
+    description,
+    jobNumber,
+    jobTitle,
+    sequence,
+    status,
+    rawStatus,
+    taskCode,
+    taskTypeDescription,
+    title: `${jobNumber} / ${taskCode}: ${description}`,
+    zone,
+  };
 }
 
 function JsonPreview({ value }: { value: unknown }) {
@@ -315,18 +408,6 @@ export function FactoryDashboard() {
             >
               Refresh
             </button>
-            <Link
-              to="/admin"
-              className="border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
-            >
-              Library admin
-            </Link>
-            <Link
-              to="/chat"
-              className="border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
-            >
-              Legacy chat
-            </Link>
           </div>
         </div>
       </div>
@@ -433,12 +514,13 @@ function OverviewTab({
           </EmptyState>
         ) : (
           <div className="overflow-x-auto border border-[var(--border)]">
-            <table className="w-full min-w-[900px] text-sm">
+            <table className="w-full min-w-[980px] text-sm">
               <thead className="bg-[var(--surface-2)] text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Instance</th>
                   <th className="px-3 py-2 font-medium">Status</th>
-                  <th className="px-3 py-2 font-medium">Staff</th>
+                  <th className="px-3 py-2 font-medium">Execution Staff</th>
+                  <th className="px-3 py-2 font-medium">OAuth Staff</th>
                   <th className="px-3 py-2 font-medium">Board</th>
                   <th className="px-3 py-2 font-medium">Heartbeat</th>
                   <th className="px-3 py-2 font-medium text-right">Control</th>
@@ -462,7 +544,10 @@ function OverviewTab({
                       )}
                     </td>
                     <td className="px-3 py-2 text-[var(--text-secondary)]">
-                      {instance.detected_staff_code || instance.staff_code}
+                      {instance.staff_code || '-'}
+                    </td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">
+                      {instance.detected_staff_code || '-'}
                     </td>
                     <td className="px-3 py-2 text-[var(--text-secondary)]">
                       {instance.board_name}
@@ -522,19 +607,24 @@ function CompactRunList({ runs }: { runs: FactoryRun[] }) {
   if (runs.length === 0) return <EmptyState>No runs in this state.</EmptyState>;
   return (
     <div className="border border-[var(--border)]">
-      {runs.slice(0, 8).map((run) => (
-        <div key={run.id} className="border-b border-[var(--border)] p-3 last:border-b-0">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{run.pave_task_title || run.id}</div>
-              <div className="text-xs text-[var(--text-secondary)]">
-                {run.pave_task_id || 'no PAVE task'} / {run.phase}
+      {runs.slice(0, 8).map((run) => {
+        const task = getRunTaskInfo(run);
+        return (
+          <div key={run.id} className="border-b border-[var(--border)] p-3 last:border-b-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{task.title}</div>
+                <div className="text-xs text-[var(--text-secondary)]">
+                  {task.status}
+                  {task.sequence ? ` / Seq ${task.sequence}` : ''}
+                  {task.zone ? ` / Zone ${task.zone}` : ''} / {formatRunState(run.phase)}
+                </div>
               </div>
+              <StatusPill status={run.status} />
             </div>
-            <StatusPill status={run.status} />
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -584,28 +674,33 @@ function RunsTab({
           <EmptyState>No PAVE factory runs have been recorded.</EmptyState>
         ) : (
           <div className="border border-[var(--border)]">
-            {runs.map((run) => (
-              <button
-                key={run.id}
-                type="button"
-                onClick={() => onSelectRun(run.id)}
-                className={`block w-full border-b border-[var(--border)] p-3 text-left last:border-b-0 ${
-                  selectedRunId === run.id ? 'bg-[var(--surface-2)]' : 'hover:bg-[var(--surface-1)]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">
-                      {run.pave_task_title || run.id}
+            {runs.map((run) => {
+              const task = getRunTaskInfo(run);
+              return (
+                <button
+                  key={run.id}
+                  type="button"
+                  onClick={() => onSelectRun(run.id)}
+                  className={`block w-full border-b border-[var(--border)] p-3 text-left last:border-b-0 ${
+                    selectedRunId === run.id
+                      ? 'bg-[var(--surface-2)]'
+                      : 'hover:bg-[var(--surface-1)]'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{task.title}</div>
+                      <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                        {task.status}
+                        {task.sequence ? ` / Seq ${task.sequence}` : ''} /{' '}
+                        {formatTime(run.updated_at)}
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                      {run.pave_task_id || 'no PAVE task'} / {formatTime(run.updated_at)}
-                    </div>
+                    <StatusPill status={run.status} />
                   </div>
-                  <StatusPill status={run.status} />
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
       </section>
@@ -641,6 +736,7 @@ function RunsTab({
 }
 
 function RunSummary({ run }: { run: FactoryRun }) {
+  const task = getRunTaskInfo(run);
   return (
     <div className="border border-[var(--border)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -648,30 +744,58 @@ function RunSummary({ run }: { run: FactoryRun }) {
           <div className="text-xs uppercase tracking-normal text-[var(--text-secondary)]">
             PAVE run
           </div>
-          <h3 className="mt-1 text-lg font-semibold">{run.pave_task_title || run.id}</h3>
+          <h3 className="mt-1 text-lg font-semibold">{task.title}</h3>
+          {task.jobTitle && (
+            <div className="mt-1 text-sm text-[var(--text-secondary)]">{task.jobTitle}</div>
+          )}
         </div>
         <StatusPill status={run.status} />
       </div>
       <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
         <div>
-          <div className="text-xs text-[var(--text-secondary)]">Task</div>
-          <div>{run.pave_task_id || '-'}</div>
+          <div className="text-xs text-[var(--text-secondary)]">Task code</div>
+          <div>
+            {task.taskCode}
+            {task.taskTypeDescription ? ` - ${task.taskTypeDescription}` : ''}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-[var(--text-secondary)]">Description</div>
+          <div>{task.description}</div>
+        </div>
+        <div>
+          <div className="text-xs text-[var(--text-secondary)]">PAVE status</div>
+          <div>
+            {task.status}
+            {task.rawStatus && task.rawStatus !== task.status ? ` (${task.rawStatus})` : ''}
+          </div>
         </div>
         <div>
           <div className="text-xs text-[var(--text-secondary)]">Work item</div>
-          <div>{run.pave_work_item_id || '-'}</div>
+          <div>{task.jobNumber}</div>
         </div>
         <div>
-          <div className="text-xs text-[var(--text-secondary)]">eDoc</div>
-          <div>{run.e_doc_status || 'not uploaded'}</div>
-        </div>
-        <div>
-          <div className="text-xs text-[var(--text-secondary)]">Phase</div>
-          <div>{run.phase}</div>
+          <div className="text-xs text-[var(--text-secondary)]">Sequence / zone</div>
+          <div>
+            {task.sequence ? `Seq ${task.sequence}` : '-'}
+            {task.zone ? ` / Zone ${task.zone}` : ''}
+          </div>
         </div>
         <div>
           <div className="text-xs text-[var(--text-secondary)]">Staff</div>
           <div>{run.staff_code || '-'}</div>
+        </div>
+        <div>
+          <div className="text-xs text-[var(--text-secondary)]">Board</div>
+          <div>{task.board || '-'}</div>
+        </div>
+        <div>
+          <div className="text-xs text-[var(--text-secondary)]">Run phase</div>
+          <div>{formatRunState(run.phase)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-[var(--text-secondary)]">eDoc</div>
+          <div>{run.e_doc_status || 'not uploaded'}</div>
         </div>
         <div>
           <div className="text-xs text-[var(--text-secondary)]">Updated</div>
@@ -900,10 +1024,14 @@ function ToolingTab({
   onCheck: () => void;
   onUpdate: (tool: FactoryTool) => void;
 }) {
+  const displayTools = visibleToolingRows(tools);
+  const runtimeTools = displayTools.filter((tool) => !skillCatalogToolTypes.has(tool.tool_type));
+  const skillTools = displayTools.filter((tool) => skillCatalogToolTypes.has(tool.tool_type));
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Skills, plugins, and MCP tooling</h2>
+        <h2 className="text-lg font-semibold">Tooling inventory</h2>
         <button
           type="button"
           onClick={onCheck}
@@ -914,56 +1042,25 @@ function ToolingTab({
         </button>
       </div>
 
-      {tools.length === 0 ? (
-        <EmptyState>No tooling inventory has been reported.</EmptyState>
-      ) : (
-        <div className="overflow-x-auto border border-[var(--border)]">
-          <table className="w-full min-w-[900px] text-sm">
-            <thead className="bg-[var(--surface-2)] text-left">
-              <tr>
-                <th className="px-3 py-2 font-medium">Tool</th>
-                <th className="px-3 py-2 font-medium">Type</th>
-                <th className="px-3 py-2 font-medium">Installed</th>
-                <th className="px-3 py-2 font-medium">Latest</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tools.map((tool) => (
-                <tr key={tool.id} className="border-t border-[var(--border)]">
-                  <td className="px-3 py-2">
-                    <div className="font-medium">{tool.name}</div>
-                    <div className="text-xs text-[var(--text-secondary)]">
-                      {tool.source_url || '-'}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-[var(--text-secondary)]">{tool.tool_type}</td>
-                  <td className="px-3 py-2 text-[var(--text-secondary)]">
-                    {tool.installed_version || '-'}
-                  </td>
-                  <td className="px-3 py-2 text-[var(--text-secondary)]">
-                    {tool.latest_version || '-'}
-                  </td>
-                  <td className="px-3 py-2">
-                    <StatusPill status={tool.update_available ? 'update_available' : tool.status} />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button
-                      type="button"
-                      onClick={() => onUpdate(tool)}
-                      disabled={pending === tool.id}
-                      className="border border-[var(--border)] px-3 py-1.5 text-xs hover:bg-[var(--surface-2)] disabled:opacity-50"
-                    >
-                      Update
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <section>
+        <h3 className="mb-2 text-base font-semibold">Runtime dependencies</h3>
+        <ToolingTable
+          tools={runtimeTools}
+          emptyText="No runtime dependency inventory has been reported."
+          pending={pending}
+          onUpdate={onUpdate}
+        />
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-base font-semibold">Skill and plugin catalogs</h3>
+        <ToolingTable
+          tools={skillTools}
+          emptyText="No skill or plugin catalog inventory has been reported."
+          pending={pending}
+          onUpdate={onUpdate}
+        />
+      </section>
 
       <section>
         <h3 className="mb-2 text-base font-semibold">Update jobs</h3>
@@ -989,6 +1086,81 @@ function ToolingTab({
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function ToolingTable({
+  tools,
+  emptyText,
+  pending,
+  onUpdate,
+}: {
+  tools: FactoryTool[];
+  emptyText: string;
+  pending: string | null;
+  onUpdate: (tool: FactoryTool) => void;
+}) {
+  if (tools.length === 0) {
+    return <EmptyState>{emptyText}</EmptyState>;
+  }
+
+  return (
+    <div className="overflow-x-auto border border-[var(--border)]">
+      <table className="w-full min-w-[980px] text-sm">
+        <thead className="bg-[var(--surface-2)] text-left">
+          <tr>
+            <th className="px-3 py-2 font-medium">Tool</th>
+            <th className="px-3 py-2 font-medium">Type</th>
+            <th className="px-3 py-2 font-medium">Scope</th>
+            <th className="px-3 py-2 font-medium">Installed</th>
+            <th className="px-3 py-2 font-medium">Latest</th>
+            <th className="px-3 py-2 font-medium">Status</th>
+            <th className="px-3 py-2 font-medium text-right">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tools.map((tool) => (
+            <tr key={tool.id} className="border-t border-[var(--border)]">
+              <td className="px-3 py-2">
+                <div className="font-medium">{tool.name}</div>
+                <div className="text-xs text-[var(--text-secondary)]">
+                  {formatToolDetail(tool)}
+                </div>
+              </td>
+              <td className="px-3 py-2 text-[var(--text-secondary)]">
+                {formatToolType(tool.tool_type)}
+              </td>
+              <td className="px-3 py-2 text-[var(--text-secondary)]">
+                {formatToolScope(tool)}
+              </td>
+              <td className="px-3 py-2 text-[var(--text-secondary)]">
+                {tool.installed_version || '-'}
+              </td>
+              <td className="px-3 py-2 text-[var(--text-secondary)]">
+                {tool.latest_version || '-'}
+              </td>
+              <td className="px-3 py-2">
+                <StatusPill status={tool.update_available ? 'update_available' : tool.status} />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => onUpdate(tool)}
+                  disabled={pending === tool.id || !tool.update_available}
+                  className="border border-[var(--border)] px-3 py-1.5 text-xs hover:bg-[var(--surface-2)] disabled:opacity-50"
+                >
+                  {tool.update_available
+                    ? 'Update'
+                    : tool.status === 'missing'
+                      ? 'Unavailable'
+                      : 'Current'}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

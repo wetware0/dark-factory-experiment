@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 
@@ -21,7 +21,7 @@ from backend import rate_limit, signup_rate_limit
 from backend.auth.dependencies import COOKIE_NAME, get_current_user, is_admin_email
 from backend.auth.password import hash_password, verify_password
 from backend.auth.tokens import encode_token
-from backend.config import JWT_EXPIRY_SECONDS, MEMBERSHIP_REFRESH_SECONDS
+from backend.config import FACTORY_API_ONLY, JWT_EXPIRY_SECONDS, MEMBERSHIP_REFRESH_SECONDS
 from backend.db import users_repo
 from backend.db.postgres import get_pg_pool
 from backend.integrations import circle
@@ -112,6 +112,19 @@ def _client_ip(request: Request) -> str:
     `signup_rate_limit.py` docstring for the threat model.
     """
     return request.client.host if request.client else "0.0.0.0"
+
+
+async def get_current_user_or_factory(
+    session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    if FACTORY_API_ONLY:
+        return {
+            "id": "factory-local-operator",
+            "email": "factory.local@dark-factory",
+            "is_member": True,
+            "member_verified_at": datetime.now(UTC),
+        }
+    return await get_current_user(session=session)
 
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
@@ -212,7 +225,7 @@ async def logout() -> Response:
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(user: dict[str, Any] = Depends(get_current_user)) -> MeResponse:
+async def me(user: dict[str, Any] = Depends(get_current_user_or_factory)) -> MeResponse:
     """Return the currently-authenticated user plus their daily quota counter.
 
     Also opportunistically re-verifies Circle membership when the cached
@@ -221,6 +234,17 @@ async def me(user: dict[str, Any] = Depends(get_current_user)) -> MeResponse:
     login time) once Circle recovers, without requiring the user to log out
     and back in.
     """
+    if FACTORY_API_ONLY:
+        return MeResponse(
+            id=str(user["id"]),
+            email=str(user["email"]),
+            is_admin=True,
+            is_member=True,
+            messages_used_today=0,
+            messages_remaining_today=999999,
+            rate_window_resets_at=None,
+        )
+
     is_member = bool(user.get("is_member") or False)
     verified_at = user.get("member_verified_at")
     needs_refresh = verified_at is None or (

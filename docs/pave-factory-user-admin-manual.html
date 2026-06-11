@@ -1,0 +1,1155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PAVE Dark Factory Worker - User and Administrator Manual</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5b6578;
+      --line: #d7deeb;
+      --accent: #1f6feb;
+      --accent-soft: #e8f1ff;
+      --warn: #8a5a00;
+      --warn-bg: #fff4d5;
+      --bad: #9b1c1c;
+      --bad-bg: #ffe2e2;
+      --good: #116329;
+      --good-bg: #ddf4e4;
+      --code: #0f172a;
+      --code-bg: #eef2f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", Arial, sans-serif;
+      line-height: 1.55;
+    }
+
+    header {
+      background: #0f172a;
+      color: #ffffff;
+      padding: 32px 40px;
+      border-bottom: 4px solid var(--accent);
+    }
+
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.2;
+    }
+
+    header p {
+      max-width: 1100px;
+      margin: 0;
+      color: #dbeafe;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      gap: 24px;
+      padding: 24px;
+      max-width: 1480px;
+      margin: 0 auto;
+    }
+
+    nav {
+      position: sticky;
+      top: 16px;
+      align-self: start;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 18px;
+    }
+
+    nav h2 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    nav a {
+      display: block;
+      padding: 6px 0;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 14px;
+    }
+
+    nav a:hover {
+      text-decoration: underline;
+    }
+
+    article {
+      min-width: 0;
+    }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+      line-height: 1.25;
+    }
+
+    h3 {
+      margin: 24px 0 8px;
+      font-size: 18px;
+    }
+
+    h4 {
+      margin: 18px 0 8px;
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    p {
+      margin: 8px 0 12px;
+    }
+
+    ul, ol {
+      margin: 8px 0 16px 24px;
+      padding: 0;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 18px;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f5fb;
+      color: #23314d;
+    }
+
+    code {
+      color: var(--code);
+      background: var(--code-bg);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.95em;
+    }
+
+    pre {
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 14px;
+      overflow-x: auto;
+      border-radius: 4px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    pre code {
+      color: inherit;
+      background: transparent;
+      padding: 0;
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 12px 14px;
+      margin: 14px 0;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+      background: var(--warn-bg);
+      color: var(--warn);
+    }
+
+    .danger {
+      border-left-color: var(--bad);
+      background: var(--bad-bg);
+      color: var(--bad);
+    }
+
+    .success {
+      border-left-color: var(--good);
+      background: var(--good-bg);
+      color: var(--good);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      padding: 14px;
+      background: #fbfdff;
+    }
+
+    .small {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 980px) {
+      main {
+        grid-template-columns: 1fr;
+        padding: 14px;
+      }
+
+      nav {
+        position: static;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PAVE Dark Factory Worker - User and Administrator Manual</h1>
+    <p>
+      Operating guide for the WiseTech Global dark factory worker that discovers PAVE work for CargoWise,
+      reports to the factory portal, uses WTG MCP services, and executes Archon workflows from PAVE as the
+      single source of truth.
+    </p>
+    <p class="small">Last updated: 2026-06-10. Repository path: <code>C:\git\dark-factory-experiment</code>.</p>
+  </header>
+
+  <main>
+    <nav aria-label="Manual contents">
+      <h2>Contents</h2>
+      <a href="#scope">Scope</a>
+      <a href="#roles">Roles</a>
+      <a href="#concepts">Core Concepts</a>
+      <a href="#quick-start">Quick Start</a>
+      <a href="#dashboard">Dashboard User Guide</a>
+      <a href="#daily-ops">Daily Operations</a>
+      <a href="#admin-setup">Administrator Setup</a>
+      <a href="#configuration">Configuration Reference</a>
+      <a href="#pave-rules">PAVE Rules</a>
+      <a href="#mcp-tooling">MCP, Skills, and Tooling</a>
+      <a href="#archon">Archon and Repositories</a>
+      <a href="#evidence">Evidence and eDoc</a>
+      <a href="#self-learning">Self-Learning</a>
+      <a href="#security">Security and Controls</a>
+      <a href="#runbooks">Runbooks</a>
+      <a href="#troubleshooting">Troubleshooting</a>
+      <a href="#appendix">Appendix</a>
+    </nav>
+
+    <article>
+      <section id="scope">
+        <h2>1. Scope</h2>
+        <p>
+          This manual covers how to operate and administer the PAVE Dark Factory Worker. The worker is not a
+          general web application queue. It exists to work on CargoWise development tasks that are sourced from
+          WiseTech Global PAVE through ediProd.
+        </p>
+        <div class="callout">
+          <strong>Primary rule:</strong> PAVE is the single source of truth for work discovery, priority, lifecycle
+          state, assignment, audit trail, and final work item or incident reporting. The portal mirrors and explains
+          what is happening; it does not replace PAVE.
+        </div>
+        <p>The manual covers these operating surfaces:</p>
+        <ul>
+          <li>Factory portal at <code>http://127.0.0.1:5173/factory</code>.</li>
+          <li>Scout worker process in <code>app/backend/factory/worker.py</code>.</li>
+          <li>Backend API under <code>/api/factory</code>.</li>
+          <li>SQL Server or SQLite factory storage providers.</li>
+          <li>WTG MCP dependencies: <code>ediprod</code>, <code>wtgkb</code>, and <code>sbkb</code>.</li>
+          <li>Archon workflow dispatch for normal delivery tasks and dedicated self-learning tasks.</li>
+          <li>Local service controller: <code>scripts/factory-services.ps1</code>.</li>
+        </ul>
+      </section>
+
+      <section id="roles">
+        <h2>2. Roles</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Typical user</th>
+              <th>Responsibilities</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Operator</td>
+              <td>Person monitoring the dashboard</td>
+              <td>Watch instance health, run status, active queue, MCP readiness, tooling drift, and learning assessments. Pause/resume instances when needed.</td>
+            </tr>
+            <tr>
+              <td>Guardian</td>
+              <td><code>PWS</code> for this local instance</td>
+              <td>Receives tasks when the worker detects clarity gaps, tool failures, authorization problems, or other cases where automated completion is unsafe.</td>
+            </tr>
+            <tr>
+              <td>Execution staff code</td>
+              <td><code>C50</code> for this local instance</td>
+              <td>The PAVE staff code whose startable tasks the scout watches. PAVE allows only one playing task per staff code.</td>
+            </tr>
+            <tr>
+              <td>Administrator</td>
+              <td>Person configuring services, storage, MCPs, and updates</td>
+              <td>Configure environment, database, worker token, OAuth/MCP credentials, service lifecycle, and operational policies.</td>
+            </tr>
+            <tr>
+              <td>Developer</td>
+              <td>Engineer extending the factory</td>
+              <td>Implement Archon workflow nodes, repository-set discovery, evidence reporting, self-learning, skill allow-list enforcement, and tests.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="concepts">
+        <h2>3. Core Concepts</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>Scout Worker</h3>
+            <p>
+              A small low-token worker that polls PAVE, checks MCP readiness, checks the staff-code playing-task
+              guard, ranks startable work, and creates a compact handoff. It should not perform expensive coding
+              research while polling.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Intelligent Agent</h3>
+            <p>
+              The high-capability execution layer. It receives one PAVE task handoff, gathers task context with
+              WTG knowledge, executes an Archon DAG, creates artifacts, runs a critic node, and reports back to PAVE.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Factory Portal</h3>
+            <p>
+              A central observability and control surface. It shows instances, active runs, stalled work, MCP readiness,
+              tooling inventory, artifacts, critic output, eDoc uploads, and learning assessments.
+            </p>
+          </div>
+          <div class="card">
+            <h3>PAVE Lifecycle</h3>
+            <p>
+              Claim, start, suspend, resume, complete, and assignment state belong in PAVE. The worker must not invent
+              an independent queue or complete/suspend tasks only in the portal.
+            </p>
+          </div>
+        </div>
+
+        <h3>Current Local Defaults</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th>Current local value</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>PAVE board</td>
+              <td><code>Peter's Board</code></td>
+              <td>Board the scout watches for startable work.</td>
+            </tr>
+            <tr>
+              <td>Execution staff code</td>
+              <td><code>C50</code></td>
+              <td>Staff code whose startable tasks the scout selects.</td>
+            </tr>
+            <tr>
+              <td>Guardian staff code</td>
+              <td><code>PWS</code></td>
+              <td>Human guardian for escalation, clarity, and failure cases.</td>
+            </tr>
+            <tr>
+              <td>OAuth profile</td>
+              <td><code>PWS</code></td>
+              <td>Current edi/ediProd OAuth subject. Mismatch is explicitly allowed only when configured.</td>
+            </tr>
+            <tr>
+              <td>Default storage</td>
+              <td><code>sqlserver</code></td>
+              <td>Operational metadata store for portal, workers, runs, and tooling state.</td>
+            </tr>
+            <tr>
+              <td>Dry-run mode</td>
+              <td><code>true</code></td>
+              <td>Discovery records selected work without claiming or starting it in PAVE.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="quick-start">
+        <h2>4. Quick Start</h2>
+        <h3>Start the local services</h3>
+        <pre><code>cd C:\git\dark-factory-experiment
+.\scripts\factory-services.ps1 start
+.\scripts\factory-services.ps1 status</code></pre>
+
+        <h3>Open the dashboard</h3>
+        <pre><code>http://127.0.0.1:5173/factory</code></pre>
+
+        <h3>Expected healthy local state</h3>
+        <ul>
+          <li>One current instance for <code>C50</code> on <code>Peter's Board</code>.</li>
+          <li><code>Active runs</code> should be zero while the scout is in dry-run mode.</li>
+          <li><code>Stalled MCPs</code> should be zero when <code>ediprod</code>, <code>wtgkb</code>, and <code>sbkb</code> are ready.</li>
+          <li>Tooling should show runtime dependencies and skill/plugin catalogs separately.</li>
+          <li>Dry-run selected work should appear as <code>dry run</code>, not <code>queued</code>.</li>
+        </ul>
+
+        <div class="warning callout">
+          <strong>Do not enable live mode casually.</strong> PAVE allows only one playing task for a staff code. Starting a
+          second task for the same staff code can suspend the first playing task.
+        </div>
+      </section>
+
+      <section id="dashboard">
+        <h2>5. Dashboard User Guide</h2>
+
+        <h3>Overview Tab</h3>
+        <p>The Overview tab answers whether the worker pool is ready to act.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>What to check</th>
+              <th>Healthy signal</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Instances</td>
+              <td>Registered workers and their heartbeats.</td>
+              <td>Only live workers appear. Stale historical worker IDs are filtered out.</td>
+            </tr>
+            <tr>
+              <td>Active queue</td>
+              <td>Runs in <code>queued</code>, <code>claimed</code>, or <code>running</code>.</td>
+              <td>Dry-run selections are not active queue items.</td>
+            </tr>
+            <tr>
+              <td>Stalled work</td>
+              <td>Runs that need attention due to MCP, PAVE, Archon, or clarity failures.</td>
+              <td>Empty during normal dry-run monitoring.</td>
+            </tr>
+            <tr>
+              <td>Required MCP readiness</td>
+              <td>State of <code>ediprod</code>, <code>wtgkb</code>, and <code>sbkb</code>.</td>
+              <td>All ready. Any stale/unauthenticated/unavailable state pauses affected processing.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Runs Tab</h3>
+        <p>
+          The Runs tab shows PAVE task selections and execution attempts. It should show human PAVE identifiers,
+          including work item number, task code, task description, sequence, zone, staff, board, and phase. Task GUIDs
+          are retained in metadata but should not be the primary operator-facing identifier.
+        </p>
+        <p>Use this tab to:</p>
+        <ul>
+          <li>Open a selected run.</li>
+          <li>Read the dashboard log.</li>
+          <li>Review artifacts, repository participation, critic reports, and eDoc upload state.</li>
+          <li>Fetch the evidence report when available.</li>
+        </ul>
+
+        <h3>MCPs Tab</h3>
+        <p>Shows required MCP health and supports reauthentication tracking.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Meaning</th>
+              <th>Operator action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ready</code></td>
+              <td>The MCP is configured and usable.</td>
+              <td>No action.</td>
+            </tr>
+            <tr>
+              <td><code>stale</code></td>
+              <td>Credential or readiness state is too old to trust.</td>
+              <td>Use reauth flow or restart the affected worker after credentials are refreshed.</td>
+            </tr>
+            <tr>
+              <td><code>unauthenticated</code></td>
+              <td>Credential is missing or expired.</td>
+              <td>Reauthenticate the service account/OAuth profile, then verify readiness.</td>
+            </tr>
+            <tr>
+              <td><code>unavailable</code></td>
+              <td>MCP server cannot be reached or tool namespace is absent.</td>
+              <td>Check MCP server registration, network, and local process logs.</td>
+            </tr>
+            <tr>
+              <td><code>degraded</code></td>
+              <td>Service works partially but does not satisfy execution policy.</td>
+              <td>Pause live work until the missing capability is restored or a human waiver is recorded.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Tooling Tab</h3>
+        <p>The Tooling tab is split into runtime dependencies and skill/plugin catalogs.</p>
+        <ul>
+          <li><strong>Runtime dependencies:</strong> <code>edi</code>, <code>ediprod</code>, <code>wtgkb</code>, <code>sbkb</code>, agent runtime tooling.</li>
+          <li><strong>Skill and plugin catalogs:</strong> project skills from <code>skills-lock.json</code>, WTG.AI.Prompts, and future marketplace/plugin catalog sources.</li>
+          <li><strong>Update jobs:</strong> queued update operations for tools that have a supported automated update handler.</li>
+        </ul>
+        <p>
+          A missing <code>WTG.AI.Prompts</code> local clone does not prevent dry-run scouting. It means local prompt-repo
+          update actions are unavailable and workers should use installed project skills plus <code>wtgkb</code> or GitHub
+          metadata fallback for prompt guidance.
+        </p>
+
+        <h3>Learning Tab</h3>
+        <p>
+          Shows self-learning assessments created by dedicated PAVE learning tasks. These are separate from normal
+          coding/review tasks. The expected PAVE shape is task type <code>INT</code> with <code>Self Learning</code> in
+          the task description.
+        </p>
+      </section>
+
+      <section id="daily-ops">
+        <h2>6. Daily Operations</h2>
+
+        <h3>Morning readiness check</h3>
+        <ol>
+          <li>Start or verify services with <code>.\scripts\factory-services.ps1 status</code>.</li>
+          <li>Open <code>/factory</code>.</li>
+          <li>Confirm one live instance for the expected staff code and board.</li>
+          <li>Confirm required MCPs are ready.</li>
+          <li>Confirm Tooling shows no update-required items unless explicitly pinned/waived.</li>
+          <li>Confirm active queue is empty before allowing the scout to start live PAVE work.</li>
+        </ol>
+
+        <h3>Dry-run monitoring</h3>
+        <p>
+          In dry-run mode the scout can discover startable tasks and write portal runs without mutating PAVE. This is
+          the preferred mode for validating configuration, board visibility, MCP readiness, and task classification.
+        </p>
+        <p>Dry-run runs should have:</p>
+        <ul>
+          <li>Status <code>dry run</code>.</li>
+          <li>Phase <code>scout dry run</code> for normal delivery tasks.</li>
+          <li>Phase <code>self learning dry run</code> for dedicated learning tasks.</li>
+          <li>No PAVE claim/start side effect.</li>
+        </ul>
+
+        <h3>Live work enablement</h3>
+        <p>Only enable live mode after all of these are true:</p>
+        <ol>
+          <li>The PAVE board and execution staff code are correct.</li>
+          <li>The scout sees no currently playing task for the execution staff code.</li>
+          <li><code>ediprod</code>, <code>wtgkb</code>, and <code>sbkb</code> are ready.</li>
+          <li>The operator has accepted the OAuth/staff-code policy.</li>
+          <li>Archon workflow dispatch is configured and tested.</li>
+          <li>Guardian assignment and suspend paths are verified.</li>
+        </ol>
+
+        <pre><code>$env:FACTORY_SCOUT_DRY_RUN = "false"
+$env:FACTORY_ARCHON_EXECUTE = "true"</code></pre>
+
+        <div class="danger callout">
+          <strong>Live mode changes PAVE state.</strong> It may claim/start a task and can affect the playing-task state
+          for the configured staff code.
+        </div>
+      </section>
+
+      <section id="admin-setup">
+        <h2>7. Administrator Setup</h2>
+
+        <h3>Prerequisites</h3>
+        <ul>
+          <li>Windows PowerShell.</li>
+          <li>Python and Node runtimes as used by the repo.</li>
+          <li><code>uv</code> for backend commands.</li>
+          <li>Node package manager available for frontend commands.</li>
+          <li>ODBC Driver 18 for SQL Server when using SQL Server storage.</li>
+          <li>Access to PAVE/ediProd through the <code>edi</code> CLI and MCP services.</li>
+          <li>Codex/agent MCP configuration containing <code>ediprod</code>, <code>wtgkb</code>, and <code>sbkb</code>.</li>
+          <li>Optional local vault/repo paths: <code>C:\git\WTG.sbkb-mcp</code>, <code>C:\git\SecondBrain</code>, and <code>C:\git\WTG.AI.Prompts</code>.</li>
+        </ul>
+
+        <h3>First setup sequence</h3>
+        <ol>
+          <li>Clone the repo.</li>
+          <li>Install backend and frontend dependencies according to existing project tooling.</li>
+          <li>Create or select a SQL Server database, normally <code>DarkFactory</code>.</li>
+          <li>Configure <code>.env</code> or PowerShell environment variables.</li>
+          <li>Run <code>edi login</code> or equivalent OAuth setup.</li>
+          <li>Verify <code>edi staff get</code> returns the expected OAuth staff code.</li>
+          <li>Verify <code>codex mcp list</code> includes <code>ediprod</code>, <code>wtgkb</code>, and <code>sbkb</code>.</li>
+          <li>Start services.</li>
+          <li>Open the dashboard and confirm readiness.</li>
+        </ol>
+
+        <h3>SQL Server storage</h3>
+        <p>Recommended local SQL Server connection for the current workstation:</p>
+        <pre><code>FACTORY_STORAGE_PROVIDER=sqlserver
+FACTORY_SQLSERVER_CONNECTION_STRING="Driver={ODBC Driver 18 for SQL Server};Server=RYZEN2;Database=DarkFactory;Trusted_Connection=yes;Encrypt=yes;TrustServerCertificate=yes;Application Name=Dark Factory;"</code></pre>
+
+        <p>
+          The application creates factory tables idempotently on first use. Use a shared SQL Server database for
+          multi-instance coordination. SQLite is for local smoke testing only.
+        </p>
+
+        <h3>SQLite smoke-test storage</h3>
+        <pre><code>FACTORY_STORAGE_PROVIDER=sqlite
+FACTORY_SQLITE_PATH=.factory/factory.sqlite3</code></pre>
+
+        <h3>Factory-only mode</h3>
+        <p>
+          <code>FACTORY_API_ONLY=true</code> runs only the PAVE factory API/worker surface and bypasses the inherited
+          chat/RAG Postgres startup path. This is the normal local mode for this worker experiment.
+        </p>
+      </section>
+
+      <section id="configuration">
+        <h2>8. Configuration Reference</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Default / example</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>FACTORY_API_ONLY</code></td>
+              <td><code>true</code> for local factory mode</td>
+              <td>Skips inherited chat/RAG startup and serves the factory portal/API.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_STORAGE_PROVIDER</code></td>
+              <td><code>sqlserver</code></td>
+              <td>Factory storage provider. Supported local options are SQL Server and SQLite.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_SQLSERVER_CONNECTION_STRING</code></td>
+              <td>ODBC SQL Server connection string</td>
+              <td>Required when storage provider is SQL Server.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_SQLITE_PATH</code></td>
+              <td><code>.factory/factory.sqlite3</code></td>
+              <td>Local SQLite file for smoke tests.</td>
+            </tr>
+            <tr>
+              <td><code>PAVE_BOARD_NAME</code></td>
+              <td><code>Peter's Board</code></td>
+              <td>PAVE board watched by the scout.</td>
+            </tr>
+            <tr>
+              <td><code>PAVE_STAFF_CODE</code></td>
+              <td><code>C50</code></td>
+              <td>Execution staff code whose tasks are selected.</td>
+            </tr>
+            <tr>
+              <td><code>PAVE_GUARDIAN_STAFF_CODE</code></td>
+              <td><code>PWS</code></td>
+              <td>Guardian staff code used for clarity/failure escalation.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_SCOUT_DRY_RUN</code></td>
+              <td><code>true</code></td>
+              <td>When true, scout records selections without PAVE claim/start mutation.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_ARCHON_EXECUTE</code></td>
+              <td><code>false</code></td>
+              <td>When true, live runs dispatch Archon workflows after claim/start gates pass.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_ARCHON_WORKFLOW_NAME</code></td>
+              <td><code>pave-dark-factory-execute-task</code></td>
+              <td>Default workflow for delivery tasks.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_SELF_LEARNING_WORKFLOW_NAME</code></td>
+              <td><code>pave-dark-factory-self-learning</code></td>
+              <td>Workflow used when a startable task is classified as a self-learning task.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_ALLOW_OAUTH_STAFF_MISMATCH</code></td>
+              <td><code>false</code></td>
+              <td>Allows PWS OAuth to perform configured C50 execution when explicitly accepted.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_SCOUT_INTERVAL_SECONDS</code></td>
+              <td><code>60</code></td>
+              <td>Scout polling interval.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_INSTANCE_STALE_SECONDS</code></td>
+              <td>3 scout intervals</td>
+              <td>How long a worker heartbeat remains live in the dashboard.</td>
+            </tr>
+            <tr>
+              <td><code>FACTORY_PAVE_BOARD_CHANNEL_FALLBACK</code></td>
+              <td><code>true</code></td>
+              <td>Uses Glow/PAVE board channel fallback when staff-task CLI rows are incomplete.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="pave-rules">
+        <h2>9. PAVE Rules</h2>
+
+        <h3>Startable work discovery</h3>
+        <ol>
+          <li>Required MCPs are checked first.</li>
+          <li>The scout reads staff tasks and board channel fallback data.</li>
+          <li>The scout filters to the configured board and execution staff code.</li>
+          <li>The scout checks no task is already playing for the execution staff code.</li>
+          <li>The scout selects one startable task, preferring earlier board zones and startable/release times.</li>
+          <li>The scout resolves the selected row to a PAVE task ID and workflow ID.</li>
+          <li>Dry-run mode records the selection; live mode continues to claim/start gates.</li>
+        </ol>
+
+        <h3>Single playing-task constraint</h3>
+        <p>
+          PAVE allows only one playing task per staff code. Starting a new task can suspend any currently playing task
+          for that staff code. The worker therefore checks playing tasks before starting work and rechecks before live
+          mutation.
+        </p>
+
+        <h3>Guardian escalation</h3>
+        <p>When clarity or failures are detected after PAVE mutation, the worker should:</p>
+        <ol>
+          <li>Append a task note explaining the failure or clarity gap.</li>
+          <li>Suspend the task when possible.</li>
+          <li>Assign the item/task to the guardian staff code.</li>
+          <li>Record the escalation in the dashboard log and evidence report.</li>
+        </ol>
+
+        <h3>Self-learning task shape</h3>
+        <p>A dedicated PAVE self-learning task is recognized only when both conditions are true:</p>
+        <ul>
+          <li>Task type is <code>INT</code>.</li>
+          <li>Task description contains <code>Self Learning</code>.</li>
+        </ul>
+        <p>
+          These tasks route to <code>FACTORY_SELF_LEARNING_WORKFLOW_NAME</code> and should not be treated as ordinary
+          coding/design/review tasks.
+        </p>
+      </section>
+
+      <section id="mcp-tooling">
+        <h2>10. MCP, Skills, and Tooling</h2>
+
+        <h3>Required MCP roles</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>MCP</th>
+              <th>Role</th>
+              <th>Fail-closed behavior</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ediprod</code></td>
+              <td>PAVE lifecycle, work item/incident updates, task notes, eDoc upload.</td>
+              <td>Pause PAVE polling and live task mutation.</td>
+            </tr>
+            <tr>
+              <td><code>wtgkb</code></td>
+              <td>Current WTG/CargoWise/PAVE knowledge retrieval for the task.</td>
+              <td>Block or require human approval for high-risk coding tasks.</td>
+            </tr>
+            <tr>
+              <td><code>sbkb</code></td>
+              <td>Durable Second Brain learning storage, mainly during dedicated self-learning tasks.</td>
+              <td>Do not write durable learning notes; record degraded learning state.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Skills and plugin use</h3>
+        <p>
+          Skills and plugins are controlled inputs, not decoration. The DAG should nominate the allowed skills for each
+          node. Claude-backed Archon nodes can pass these through native per-node <code>skills:</code>. Codex-backed
+          nodes currently discover skills globally, so the executor must enforce the allow-list by loading only nominated
+          skill context and recording what was used.
+        </p>
+
+        <h3>Installed skill catalog</h3>
+        <p>
+          The project skill catalog is tracked by <code>skills-lock.json</code>. Current locked project skills include
+          PAVE, ediProd, ediProd CLI, Glow API, code review, work item status, and board troubleshooting guidance.
+        </p>
+
+        <h3>WTG.AI.Prompts</h3>
+        <p>
+          WTG.AI.Prompts should be treated as a marketplace/catalog source. Do not bulk-load the entire repository into
+          every node. Select phase-specific and domain-specific skills/plugins, record the decision, and persist usage
+          to run artifacts and skill invocation storage.
+        </p>
+      </section>
+
+      <section id="archon">
+        <h2>11. Archon and Repository Execution</h2>
+
+        <h3>Normal delivery workflow</h3>
+        <p>
+          Normal PAVE delivery tasks use <code>pave-dark-factory-execute-task</code>. The workflow should cover task
+          contract loading, repository set discovery, context gathering, implementation, validation, critic review,
+          reporting, and close/suspend handling.
+        </p>
+
+        <h3>Self-learning workflow</h3>
+        <p>
+          Dedicated self-learning tasks route to <code>pave-dark-factory-self-learning</code>. This workflow should
+          compare generated artifacts with what was actually used, identify manual changes, create a learning assessment,
+          and write approved durable learning to <code>sbkb</code>.
+        </p>
+
+        <h3>Modular CargoWise repositories</h3>
+        <p>
+          CargoWise work can span the main <code>CargoWise</code> repository and one or more sibling
+          <code>CargoWise.*</code> repositories. A single PAVE work item may require multiple branches, PRs, build plans,
+          test plans, and evidence records.
+        </p>
+
+        <h3>Repository-set evidence</h3>
+        <p>Each run should record:</p>
+        <ul>
+          <li>Repository name and path.</li>
+          <li>Base branch and worker branch.</li>
+          <li>Commit SHA and PR URL when created.</li>
+          <li>Build/test command and result.</li>
+          <li>Artifacts generated for that repository.</li>
+          <li>Any repository access, dirty state, or build blocker.</li>
+        </ul>
+      </section>
+
+      <section id="evidence">
+        <h2>12. Evidence and eDoc</h2>
+        <p>
+          Every real run should produce an audit/evidence report against the PAVE job eDoc. The evidence report must
+          include the same full log visible in the dashboard, plus critic output and links or references to generated
+          artifacts.
+        </p>
+
+        <h3>Evidence report minimum contents</h3>
+        <ul>
+          <li>Run ID and instance ID.</li>
+          <li>PAVE job number, task ID, task code, task description, board, staff code, and guardian code.</li>
+          <li>Claim/start/suspend/complete attempts and results.</li>
+          <li>Full dashboard event log.</li>
+          <li>Repository participation and PRs.</li>
+          <li>Generated artifacts: specs, coding, review, validation, critic, final report, self-learning assessment.</li>
+          <li>Critic findings and verdict.</li>
+          <li>eDoc upload status and document ID.</li>
+          <li>Failures, retries, escalations, and guardian assignment.</li>
+        </ul>
+
+        <h3>eDoc file type</h3>
+        <p>
+          Internal evidence should use <code>INT</code> when accepted for the job type. The current worker evidence
+          upload helper defaults to <code>INT</code>.
+        </p>
+      </section>
+
+      <section id="self-learning">
+        <h2>13. Self-Learning</h2>
+        <p>
+          Self-learning is not part of the coding task. It is a later PAVE task that assesses whether the generated
+          artifact was used as generated.
+        </p>
+
+        <h3>Trigger</h3>
+        <p>The task must match both of these conditions:</p>
+        <ul>
+          <li><code>type == INT</code></li>
+          <li><code>description</code> contains <code>Self Learning</code></li>
+        </ul>
+
+        <h3>Workflow objective</h3>
+        <ol>
+          <li>Load the original run artifacts and accepted final artifact.</li>
+          <li>Compare generated output with manual or downstream changes.</li>
+          <li>Create <code>self-learning-assessment.json</code> and <code>self-learning-assessment.md</code>.</li>
+          <li>Surface learnings and confidence levels.</li>
+          <li>Write approved durable learnings to <code>sbkb</code>.</li>
+          <li>Record <code>sbkb</code> note IDs in the portal and PAVE.</li>
+        </ol>
+
+        <div class="warning callout">
+          The critic node may identify learning candidates, but it must not write durable Second Brain notes. Durable
+          writes belong in the dedicated self-learning PAVE task.
+        </div>
+      </section>
+
+      <section id="security">
+        <h2>14. Security and Controls</h2>
+
+        <h3>Worker token</h3>
+        <p>
+          Worker API routes require <code>X-Factory-Worker-Token</code> and <code>X-Factory-Instance-Id</code>. The local
+          service script creates <code>.factory/factory-worker-token.txt</code> when needed. Treat this token as a local
+          secret.
+        </p>
+
+        <h3>OAuth and staff-code mismatch</h3>
+        <p>
+          The local OAuth profile may be <code>PWS</code> while the execution staff code is <code>C50</code>. Live PAVE
+          mutation is blocked unless <code>FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true</code> is explicitly set.
+        </p>
+
+        <h3>Least privilege</h3>
+        <ul>
+          <li>Do not grant workers broad PAVE mutation ability unless the play guard and guardian escalation are working.</li>
+          <li>Do not allow stale or unauthenticated MCPs to produce partially trusted results.</li>
+          <li>Do not allow skill/plugin updates to occur silently before execution. Updates should be visible and auditable.</li>
+          <li>Do not expose worker tokens, OAuth token files, SQL Server credentials, or logs containing sensitive job data.</li>
+        </ul>
+      </section>
+
+      <section id="runbooks">
+        <h2>15. Runbooks</h2>
+
+        <h3>Start, stop, restart, and status</h3>
+        <pre><code>.\scripts\factory-services.ps1 start
+.\scripts\factory-services.ps1 status
+.\scripts\factory-services.ps1 stop
+.\scripts\factory-services.ps1 restart</code></pre>
+
+        <h3>Switch to SQL Server</h3>
+        <pre><code>$env:FACTORY_STORAGE_PROVIDER = "sqlserver"
+$env:FACTORY_SQLSERVER_CONNECTION_STRING = "Driver={ODBC Driver 18 for SQL Server};Server=RYZEN2;Database=DarkFactory;Trusted_Connection=yes;Encrypt=yes;TrustServerCertificate=yes;Application Name=Dark Factory;"
+.\scripts\factory-services.ps1 restart</code></pre>
+
+        <h3>Switch to SQLite smoke-test mode</h3>
+        <pre><code>$env:FACTORY_STORAGE_PROVIDER = "sqlite"
+$env:FACTORY_SQLITE_PATH = ".factory/factory.sqlite3"
+.\scripts\factory-services.ps1 restart</code></pre>
+
+        <h3>Allow PWS OAuth to operate C50 explicitly</h3>
+        <pre><code>$env:FACTORY_ALLOW_OAUTH_STAFF_MISMATCH = "true"
+.\scripts\factory-services.ps1 restart</code></pre>
+
+        <h3>Run one scout cycle manually</h3>
+        <pre><code>cd C:\git\dark-factory-experiment\app
+uv --project backend run python -m backend.factory.worker --once --board-name "Peter's Board" --staff-code C50 --guardian-staff-code PWS</code></pre>
+
+        <h3>Upload evidence for a run</h3>
+        <pre><code>cd C:\git\dark-factory-experiment\app
+uv --project backend run python -m backend.factory.worker --upload-evidence-run-id RUN_ID --upload-evidence-job-number WI01000000</code></pre>
+
+        <h3>Escalate a task to guardian</h3>
+        <pre><code>cd C:\git\dark-factory-experiment\app
+uv --project backend run python -m backend.factory.worker --escalate-task-id TASK_GUID --escalation-job-number WI01000000 --escalation-reason "Needs guardian review"</code></pre>
+      </section>
+
+      <section id="troubleshooting">
+        <h2>16. Troubleshooting</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Symptom</th>
+              <th>Likely cause</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Dashboard shows multiple old instances.</td>
+              <td>Stale instance rows are being returned or service restart did not stop old worker processes.</td>
+              <td>Restart with <code>factory-services.ps1 restart</code>. Verify API filters live instances only.</td>
+            </tr>
+            <tr>
+              <td>Active queue shows a dry-run item.</td>
+              <td>Dry-run selection was saved as <code>queued</code>.</td>
+              <td>Dry-run runs should have status <code>dry_run</code> and phase <code>scout_dry_run</code> or <code>self_learning_dry_run</code>.</td>
+            </tr>
+            <tr>
+              <td>Tooling rows repeat many times.</td>
+              <td>Historical instance-specific tooling inventory is not filtered.</td>
+              <td>Use the current repository filtering; Tooling should show only live/global rows.</td>
+            </tr>
+            <tr>
+              <td><code>edi staff tasks C50</code> returns zero but board has tasks.</td>
+              <td>C50 may not have a published staff board view through that CLI path.</td>
+              <td>Use board channel fallback. Verify <code>FACTORY_PAVE_BOARD_CHANNEL_FALLBACK=true</code>.</td>
+            </tr>
+            <tr>
+              <td>MCP is stale or unauthenticated.</td>
+              <td>Credential expired, server missing, or tool registration changed.</td>
+              <td>Reauthenticate, restart the affected process, and verify MCP readiness before live work.</td>
+            </tr>
+            <tr>
+              <td>Live start is blocked due to OAuth mismatch.</td>
+              <td>OAuth staff code is PWS while execution staff code is C50.</td>
+              <td>Either authenticate as C50 or explicitly set <code>FACTORY_ALLOW_OAUTH_STAFF_MISMATCH=true</code> after accepting the risk.</td>
+            </tr>
+            <tr>
+              <td>WTG.AI.Prompts shows unavailable.</td>
+              <td>Local clone is missing at <code>C:\git\WTG.AI.Prompts</code>.</td>
+              <td>Install/clone it if local updates are required, or rely on installed project skills plus <code>wtgkb</code>/GitHub metadata fallback.</td>
+            </tr>
+            <tr>
+              <td>Self-learning task routes to normal workflow.</td>
+              <td>Task is not type <code>INT</code>, or description does not contain <code>Self Learning</code>.</td>
+              <td>Correct the PAVE task type/description or adjust the classifier only after governance approval.</td>
+            </tr>
+            <tr>
+              <td>SQL Server connection fails.</td>
+              <td>Wrong database, driver, encryption, or Windows authentication context.</td>
+              <td>Verify ODBC Driver 18, database name, integrated security, <code>Encrypt=yes</code>, and <code>TrustServerCertificate=yes</code> for local dev.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="appendix">
+        <h2>17. Appendix</h2>
+
+        <h3>Important paths</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Path</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>README.md</code></td>
+              <td>Repository overview and quick operating guidance.</td>
+            </tr>
+            <tr>
+              <td><code>docs/dark-factory-pave-single-source-report.md</code></td>
+              <td>Deep implementation handoff report.</td>
+            </tr>
+            <tr>
+              <td><code>docs/pave-factory-implementation-decisions.md</code></td>
+              <td>Assumptions and decisions log.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/factory-services.ps1</code></td>
+              <td>Local service start/stop/status/restart controller.</td>
+            </tr>
+            <tr>
+              <td><code>app/backend/factory/worker.py</code></td>
+              <td>Scout worker, tooling inventory, PAVE handoff, Archon dispatch, evidence upload helpers.</td>
+            </tr>
+            <tr>
+              <td><code>app/backend/factory/edi_cli.py</code></td>
+              <td>edi CLI and Glow board fallback adapter.</td>
+            </tr>
+            <tr>
+              <td><code>app/backend/routes/factory.py</code></td>
+              <td>Factory portal API routes.</td>
+            </tr>
+            <tr>
+              <td><code>app/frontend/src/pages/FactoryDashboard.tsx</code></td>
+              <td>Factory portal dashboard UI.</td>
+            </tr>
+            <tr>
+              <td><code>skills-lock.json</code></td>
+              <td>Installed project skill catalog lock.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Useful API endpoints</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Endpoint</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>GET /api/factory/dashboard/summary</code></td>
+              <td>Top-level dashboard counts.</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/factory/instances</code></td>
+              <td>Live/paused/stalled instances.</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/factory/mcps</code></td>
+              <td>Latest MCP readiness rows.</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/factory/runs</code></td>
+              <td>Recent factory runs.</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/factory/runs/{run_id}</code></td>
+              <td>Run detail with events, repos, artifacts, critic reports, and eDoc uploads.</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/factory/runs/{run_id}/evidence-report</code></td>
+              <td>Markdown evidence report for the run.</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/factory/tooling</code></td>
+              <td>Runtime dependency and skill/plugin catalog inventory.</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/factory/learning-assessments</code></td>
+              <td>Self-learning assessment list.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Validation commands</h3>
+        <pre><code>cd C:\git\dark-factory-experiment\app
+uv --project backend run --extra dev pytest backend/tests/test_edi_cli_adapter.py backend/tests/test_factory_worker.py backend/tests/test_factory_routes.py backend/tests/test_factory_sqlite_repository.py
+
+cd C:\git\dark-factory-experiment\app\frontend
+npm run type-check -- --pretty false
+npm exec -- biome check src/pages/FactoryDashboard.tsx --no-errors-on-unmatched
+npm run build</code></pre>
+      </section>
+    </article>
+  </main>
+</body>
+</html>

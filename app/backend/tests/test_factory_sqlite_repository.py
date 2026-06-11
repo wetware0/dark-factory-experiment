@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from backend.db import factory_sqlite_repository as repo
@@ -104,3 +106,114 @@ async def test_sqlite_factory_store_dashboard_and_tooling_jobs():
     assert updated is not None
     assert updated["status"] == "completed"
     assert updated["log"][0]["message"] == "updated"
+
+
+@pytest.mark.asyncio
+async def test_sqlite_factory_dashboard_filters_stale_instances(monkeypatch):
+    monkeypatch.setattr(repo.config, "FACTORY_INSTANCE_STALE_SECONDS", 180)
+    current = await repo.upsert_instance(
+        instance_id="worker-current",
+        name="Current worker",
+        host_name="local",
+        staff_code="C50",
+        detected_staff_code="PWS",
+        board_name="Peter's Board",
+        status="ready",
+    )
+    stale = await repo.upsert_instance(
+        instance_id="worker-stale",
+        name="Stale worker",
+        host_name="local",
+        staff_code="C50",
+        detected_staff_code="PWS",
+        board_name="Peter's Board",
+        status="ready",
+    )
+    old_heartbeat = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+    await repo._run(
+        lambda conn: repo._save(
+            conn,
+            "instances",
+            {
+                **stale,
+                "last_heartbeat_at": old_heartbeat,
+                "updated_at": old_heartbeat,
+            },
+        )
+    )
+    await repo.record_mcp_readiness(
+        instance_id=current["id"],
+        mcp_name="ediprod",
+        status="ready",
+    )
+    await repo.record_mcp_readiness(
+        instance_id=stale["id"],
+        mcp_name="ediprod",
+        status="unauthenticated",
+    )
+    await repo.upsert_tooling_inventory(
+        instance_id=current["id"],
+        tool_type="mcp",
+        name="ediprod",
+        installed_version=None,
+        latest_version=None,
+        status="configured",
+        update_available=False,
+    )
+    await repo.upsert_tooling_inventory(
+        instance_id=stale["id"],
+        tool_type="mcp",
+        name="ediprod",
+        installed_version="old",
+        latest_version="new",
+        status="configured",
+        update_available=True,
+    )
+    await repo.upsert_tooling_inventory(
+        instance_id=None,
+        tool_type="skill_catalog",
+        name="Project skills",
+        installed_version="lock",
+        latest_version=None,
+        status="present",
+        update_available=False,
+    )
+
+    instances = await repo.list_instances()
+    mcps = await repo.list_latest_mcp_readiness()
+    tools = await repo.list_tooling_inventory()
+    summary = await repo.dashboard_summary()
+
+    assert [item["id"] for item in instances] == [current["id"]]
+    assert [item["instance_id"] for item in mcps] == [current["id"]]
+    assert {(item["instance_id"], item["name"]) for item in tools} == {
+        (current["id"], "ediprod"),
+        (None, "Project skills"),
+    }
+    assert summary["instances_total"] == 1
+    assert summary["instances_ready"] == 1
+    assert summary["stalled_mcp_count"] == 0
+    assert summary["tooling_updates_available"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sqlite_factory_dashboard_does_not_count_dry_run_as_active():
+    await repo.create_run(
+        instance_id="worker-current",
+        pave_task_id="task-dry-run",
+        pave_work_item_id="WI01020304",
+        pave_incident_id=None,
+        pave_task_title="WI01020304 / DES: Dry run",
+        pave_board_name="Peter's Board",
+        staff_code="C50",
+        status="dry_run",
+        phase="scout_dry_run",
+        workflow_name="pave-dark-factory-execute-task",
+        metadata={"dry_run": True},
+    )
+
+    summary = await repo.dashboard_summary()
+    runs = await repo.list_runs()
+
+    assert summary["runs_active"] == 0
+    assert runs[0]["status"] == "dry_run"

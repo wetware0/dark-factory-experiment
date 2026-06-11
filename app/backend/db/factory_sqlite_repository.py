@@ -43,6 +43,23 @@ def _limit(limit: int) -> int:
     return max(1, min(int(limit), 5000))
 
 
+def _instance_stale_seconds() -> int:
+    return max(1, int(config.FACTORY_INSTANCE_STALE_SECONDS))
+
+
+def _is_live_instance(row: dict[str, Any]) -> bool:
+    if row.get("is_paused") or row.get("status") in {"paused", "stalled"}:
+        return True
+    heartbeat_raw = str(row.get("last_heartbeat_at") or row.get("updated_at") or "")
+    try:
+        heartbeat = datetime.fromisoformat(heartbeat_raw)
+    except ValueError:
+        return False
+    if heartbeat.tzinfo is None:
+        heartbeat = heartbeat.replace(tzinfo=UTC)
+    return datetime.now(UTC) - heartbeat <= timedelta(seconds=_instance_stale_seconds())
+
+
 def _sqlite_path() -> Path:
     raw = config.FACTORY_SQLITE_PATH or ".factory/factory.sqlite3"
     path = Path(raw)
@@ -271,7 +288,12 @@ async def resume_instance(instance_id: str) -> dict[str, Any] | None:
 
 
 async def list_instances() -> list[dict[str, Any]]:
-    return await _run(lambda conn: _sort_desc(_all(conn, "instances"), "updated_at"))
+    return await _run(
+        lambda conn: _sort_desc(
+            [item for item in _all(conn, "instances") if _is_live_instance(item)],
+            "updated_at",
+        )
+    )
 
 
 async def get_instance(instance_id: str) -> dict[str, Any] | None:
@@ -322,11 +344,34 @@ def _latest_mcp_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(latest.values(), key=lambda item: (str(item.get("instance_id") or ""), str(item.get("mcp_name") or "")))
 
 
+def _live_instance_ids(conn: sqlite3.Connection) -> set[str]:
+    instances = {str(item.get("id")): item for item in _all(conn, "instances")}
+    return {
+        instance_id for instance_id, instance in instances.items() if _is_live_instance(instance)
+    }
+
+
+def _live_mcp_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    instances = {str(item.get("id")): item for item in _all(conn, "instances")}
+    live_instance_ids = {
+        instance_id for instance_id, instance in instances.items() if _is_live_instance(instance)
+    }
+    return [
+        row
+        for row in rows
+        if not row.get("instance_id")
+        or str(row.get("instance_id")) not in instances
+        or str(row.get("instance_id")) in live_instance_ids
+    ]
+
+
 async def list_latest_mcp_readiness(instance_id: str | None = None) -> list[dict[str, Any]]:
     def _sync(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         rows = _all(conn, "mcp_readiness")
         if instance_id is not None:
             rows = [row for row in rows if row.get("instance_id") == instance_id]
+        else:
+            rows = _live_mcp_rows(conn, rows)
         return _latest_mcp_rows(rows)
 
     return await _run(_sync)
@@ -963,8 +1008,14 @@ async def upsert_tooling_inventory(
 
 async def list_tooling_inventory() -> list[dict[str, Any]]:
     def _sync(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+        live_instance_ids = _live_instance_ids(conn)
+        rows = [
+            item
+            for item in _all(conn, "tooling_inventory")
+            if not item.get("instance_id") or str(item.get("instance_id")) in live_instance_ids
+        ]
         return sorted(
-            _all(conn, "tooling_inventory"),
+            rows,
             key=lambda item: (
                 not bool(item.get("update_available")),
                 str(item.get("updated_at") or ""),
@@ -1078,15 +1129,25 @@ async def add_audit_entry(
 async def dashboard_summary() -> dict[str, Any]:
     def _sync(conn: sqlite3.Connection) -> dict[str, Any]:
         instances = _all(conn, "instances")
+        live_instances = [item for item in instances if _is_live_instance(item)]
         runs = _all(conn, "runs")
-        tooling = _all(conn, "tooling_inventory")
+        live_instance_ids = {str(item.get("id")) for item in live_instances}
+        tooling = [
+            item
+            for item in _all(conn, "tooling_inventory")
+            if not item.get("instance_id") or str(item.get("instance_id")) in live_instance_ids
+        ]
         learning = _all(conn, "learning_assessments")
-        stalled = [row for row in _latest_mcp_rows(_all(conn, "mcp_readiness")) if row.get("status") in STALL_MCP_STATUSES]
+        stalled = [
+            row
+            for row in _latest_mcp_rows(_live_mcp_rows(conn, _all(conn, "mcp_readiness")))
+            if row.get("status") in STALL_MCP_STATUSES
+        ]
         return {
-            "instances_total": len(instances),
-            "instances_ready": sum(1 for item in instances if item.get("status") == "ready"),
+            "instances_total": len(live_instances),
+            "instances_ready": sum(1 for item in live_instances if item.get("status") == "ready"),
             "instances_paused": sum(
-                1 for item in instances if item.get("is_paused") or item.get("status") == "paused"
+                1 for item in live_instances if item.get("is_paused") or item.get("status") == "paused"
             ),
             "runs_active": sum(1 for item in runs if item.get("status") in ACTIVE_RUN_STATUSES),
             "runs_stalled": sum(1 for item in runs if item.get("status") == "stalled"),

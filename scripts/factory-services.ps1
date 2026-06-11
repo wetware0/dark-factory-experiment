@@ -8,6 +8,7 @@ param(
     [string] $GuardianStaffCode = "PWS",
     [bool] $ScoutDryRun = $true,
     [bool] $ArchonExecute = $false,
+    [bool] $FactoryApiOnly = $true,
     [int] $BackendPort = 8000,
     [int] $FrontendPort = 5173
 )
@@ -43,6 +44,17 @@ function Get-LogPath([string] $Name) {
     return Join-Path $LogDir "$Name.log"
 }
 
+function ConvertTo-PowerShellSingleQuotedLiteral([string] $Value) {
+    if ($null -eq $Value) {
+        $Value = ""
+    }
+    return "'" + ($Value -replace "'", "''") + "'"
+}
+
+function New-EnvAssignment([string] $Name, [string] $Value) {
+    return '$env:' + $Name + ' = ' + (ConvertTo-PowerShellSingleQuotedLiteral $Value)
+}
+
 function Get-ConfiguredValue([string] $Name, [string] $Default = "") {
     $envValue = [Environment]::GetEnvironmentVariable($Name)
     if ($envValue) {
@@ -65,6 +77,11 @@ function Get-ConfiguredValue([string] $Name, [string] $Default = "") {
 
 function Test-DatabaseConfigured {
     return [bool] (Get-ConfiguredValue "DATABASE_URL")
+}
+
+function Test-FactoryApiOnly {
+    $value = (Get-ConfiguredValue "FACTORY_API_ONLY" ([string] $FactoryApiOnly)).Trim().ToLowerInvariant()
+    return $value -in @("1", "true", "yes", "on")
 }
 
 function Test-FactoryStorageConfigured {
@@ -97,7 +114,64 @@ function Stop-ProcessTree([int] $ProcessId) {
         Stop-ProcessTree -ProcessId ([int] $child.ProcessId)
     }
     if (Test-ProcessRunning $ProcessId) {
-        Stop-Process -Id $ProcessId -Force
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Stop-MatchingFactoryProcesses([string] $Name) {
+    $repoPattern = "*" + [string] $RepoRoot + "*"
+    $patterns = switch ($Name) {
+        "backend" {
+            @(
+                "*uvicorn backend.main:app*--port $BackendPort*"
+            )
+        }
+        "frontend" {
+            @(
+                "*$RepoRoot*app*frontend*",
+                "*vite*--port $FrontendPort*"
+            )
+        }
+        "scout" {
+            @(
+                "*backend.factory.worker*--staff-code $StaffCode*",
+                "*backend.factory.worker*--board-name*$BoardName*"
+            )
+        }
+        default { @() }
+    }
+    if ($patterns.Count -eq 0) {
+        return
+    }
+
+    $matches = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $commandLine = $_.CommandLine
+        $executablePath = $_.ExecutablePath
+        if (-not $commandLine) {
+            return $false
+        }
+        if ([int] $_.ProcessId -eq $PID) {
+            return $false
+        }
+        $isRepoLocal = ($commandLine -like $repoPattern) -or ($executablePath -like $repoPattern)
+        $isServiceMatch = $false
+        foreach ($pattern in $patterns) {
+            if ($commandLine -like $pattern) {
+                $isServiceMatch = $true
+                break
+            }
+        }
+        if (-not $isServiceMatch) {
+            return $false
+        }
+        if ($Name -eq "scout") {
+            return $true
+        }
+        return $isRepoLocal
+    }
+
+    foreach ($process in ($matches | Sort-Object ProcessId -Descending)) {
+        Stop-ProcessTree -ProcessId ([int] $process.ProcessId)
     }
 }
 
@@ -124,19 +198,38 @@ function Start-FactoryService(
         Write-Host "$Name already running (PID $existingPid)"
         return
     }
+    Stop-MatchingFactoryProcesses $Name
 
     $token = Get-WorkerToken
     $logPath = Get-LogPath $Name
+    $envLines = @(
+        (New-EnvAssignment "FACTORY_WORKER_TOKEN" $token),
+        (New-EnvAssignment "PAVE_BOARD_NAME" $BoardName),
+        (New-EnvAssignment "PAVE_STAFF_CODE" $StaffCode),
+        (New-EnvAssignment "PAVE_GUARDIAN_STAFF_CODE" $GuardianStaffCode),
+        (New-EnvAssignment "FACTORY_SCOUT_DRY_RUN" ([string] $ScoutDryRun)),
+        (New-EnvAssignment "FACTORY_ARCHON_EXECUTE" ([string] $ArchonExecute)),
+        (New-EnvAssignment "FACTORY_API_ONLY" (Get-ConfiguredValue "FACTORY_API_ONLY" ([string] $FactoryApiOnly))),
+        (New-EnvAssignment "FACTORY_ALLOW_OAUTH_STAFF_MISMATCH" (Get-ConfiguredValue "FACTORY_ALLOW_OAUTH_STAFF_MISMATCH" "false")),
+        (New-EnvAssignment "FACTORY_STORAGE_PROVIDER" (Get-ConfiguredValue "FACTORY_STORAGE_PROVIDER" "sqlserver")),
+        (New-EnvAssignment "FACTORY_SQLSERVER_CONNECTION_STRING" (Get-ConfiguredValue "FACTORY_SQLSERVER_CONNECTION_STRING")),
+        (New-EnvAssignment "FACTORY_SQLITE_PATH" (Get-ConfiguredValue "FACTORY_SQLITE_PATH" ".factory/factory.sqlite3")),
+        (New-EnvAssignment "FACTORY_API_BASE" "http://127.0.0.1:$BackendPort/api"),
+        (New-EnvAssignment "VITE_API_BASE" "/api")
+    )
+    $databaseUrl = Get-ConfiguredValue "DATABASE_URL"
+    if ($databaseUrl) {
+        $envLines += New-EnvAssignment "DATABASE_URL" $databaseUrl
+    }
+    $jwtSecret = Get-ConfiguredValue "JWT_SECRET" "factory-local-jwt-secret"
+    if ($jwtSecret) {
+        $envLines += New-EnvAssignment "JWT_SECRET" $jwtSecret
+    }
+    $envBlock = $envLines -join "`r`n"
+    $logLiteral = ConvertTo-PowerShellSingleQuotedLiteral $logPath
     $escapedCommand = @"
-`$env:FACTORY_WORKER_TOKEN = '$token'
-`$env:PAVE_BOARD_NAME = '$BoardName'
-`$env:PAVE_STAFF_CODE = '$StaffCode'
-`$env:PAVE_GUARDIAN_STAFF_CODE = '$GuardianStaffCode'
-`$env:FACTORY_SCOUT_DRY_RUN = '$ScoutDryRun'
-`$env:FACTORY_ARCHON_EXECUTE = '$ArchonExecute'
-`$env:FACTORY_API_BASE = 'http://127.0.0.1:$BackendPort/api'
-`$env:VITE_API_BASE = '/api'
-$Command *> '$logPath'
+$envBlock
+$Command *> $logLiteral
 "@
 
     $process = Start-Process `
@@ -167,6 +260,7 @@ function Stop-FactoryService([string] $Name) {
     if (Test-Path -LiteralPath $pidPath) {
         Remove-Item -LiteralPath $pidPath
     }
+    Stop-MatchingFactoryProcesses $Name
 }
 
 function Show-FactoryStatus {
@@ -186,7 +280,8 @@ function Show-FactoryStatus {
 }
 
 function Start-Factory {
-    if (-not (Test-DatabaseConfigured)) {
+    $factoryApiOnlyEnabled = Test-FactoryApiOnly
+    if (-not $factoryApiOnlyEnabled -and -not (Test-DatabaseConfigured)) {
         throw "DATABASE_URL is not configured. The existing DynaChat backend still requires it before starting services."
     }
     if (-not (Test-FactoryStorageConfigured)) {
@@ -195,11 +290,18 @@ function Start-Factory {
 
     $appDir = Join-Path $RepoRoot "app"
     $frontendDir = Join-Path $RepoRoot "app/frontend"
+    $backendCommand = "uv --project backend run uvicorn backend.main:app --host 127.0.0.1 --port $BackendPort"
+    if (-not $factoryApiOnlyEnabled) {
+        $backendCommand = "uv --project backend run uvicorn backend.main:app --reload --host 127.0.0.1 --port $BackendPort"
+    }
+    $boardArg = ConvertTo-PowerShellSingleQuotedLiteral $BoardName
+    $staffArg = ConvertTo-PowerShellSingleQuotedLiteral $StaffCode
+    $guardianArg = ConvertTo-PowerShellSingleQuotedLiteral $GuardianStaffCode
 
     Start-FactoryService `
         -Name "backend" `
         -WorkingDirectory $appDir `
-        -Command "uv --project backend run uvicorn backend.main:app --reload --host 127.0.0.1 --port $BackendPort"
+        -Command $backendCommand
 
     Start-FactoryService `
         -Name "frontend" `
@@ -209,7 +311,7 @@ function Start-Factory {
     Start-FactoryService `
         -Name "scout" `
         -WorkingDirectory $appDir `
-        -Command "uv --project backend run python -m backend.factory.worker --board-name '$BoardName' --staff-code '$StaffCode' --guardian-staff-code '$GuardianStaffCode'"
+        -Command "uv --project backend run python -m backend.factory.worker --board-name $boardArg --staff-code $staffArg --guardian-staff-code $guardianArg"
 
     Write-Host "Factory dashboard: http://127.0.0.1:$FrontendPort/factory"
 }

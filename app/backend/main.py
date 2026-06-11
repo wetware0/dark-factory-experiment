@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from backend.auth.dependencies import get_current_admin, get_current_user
-from backend.config import CORS_ORIGINS, FRONTEND_DIST
+from backend.config import CORS_ORIGINS, FACTORY_API_ONLY, FACTORY_STORAGE_PROVIDER, FRONTEND_DIST
 from backend.data.seed import seed_if_empty
 from backend.db.postgres import close_pg_pool, init_pg_pool
 
@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: run Alembic migrations, init Postgres pool, then seed if empty."""
+    if FACTORY_API_ONLY:
+        logger.info("Factory API-only mode enabled; skipping legacy Postgres startup.")
+        yield
+        logger.info("Factory API-only mode shutdown complete.")
+        return
+
     logger.info("Starting up — running Alembic migrations…")
 
     # Run alembic upgrade head. alembic.ini lives at app/backend/alembic.ini
@@ -144,6 +150,13 @@ from backend.db import repository  # noqa: E402
 
 @app.get("/api/health")
 async def health():
+    if FACTORY_API_ONLY:
+        return {
+            "status": "ok",
+            "mode": "factory-api-only",
+            "db_type": FACTORY_STORAGE_PROVIDER,
+        }
+
     video_count = await repository.count_videos()
     chunk_count = await repository.count_chunks()
 

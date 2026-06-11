@@ -94,11 +94,21 @@ CHAT_MODEL: str = os.environ.get("CHAT_MODEL", "anthropic/claude-sonnet-4.6")
 # to disabled-or-near-zero thinking budget across providers via OpenRouter.
 LLM_REASONING_EFFORT: str = os.environ.get("LLM_REASONING_EFFORT", "").strip().lower()
 
-# Postgres — required for all data (chat + auth). The app fails fast without it.
+# Factory-only mode runs just the PAVE factory API/worker surface. It deliberately
+# skips the inherited chat/RAG Postgres startup path for local factory workers.
+FACTORY_API_ONLY: bool = os.environ.get("FACTORY_API_ONLY", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
+# Postgres — required for chat + auth unless the process is intentionally
+# running in factory-only mode.
 # In prod, docker-compose injects DATABASE_URL from the POSTGRES_* vars.
 # Locally, set it manually (e.g. in .env at the app/ root).
 DATABASE_URL: str = os.environ.get("DATABASE_URL", "")
-if not DATABASE_URL:
+if not DATABASE_URL and not FACTORY_API_ONLY:
     raise RuntimeError(
         "DATABASE_URL is not set. DynaChat now requires Postgres for all data "
         "(no SQLite fallback). Set DATABASE_URL in your environment before starting."
@@ -109,7 +119,7 @@ if not DATABASE_URL:
 # (i.e. auth-off local mode). In any environment with DATABASE_URL set, the real
 # secret must come from the environment.
 JWT_SECRET: str = os.environ.get("JWT_SECRET", "")
-if not JWT_SECRET and DATABASE_URL:
+if not JWT_SECRET and DATABASE_URL and not FACTORY_API_ONLY:
     print(
         "WARNING: DATABASE_URL is set but JWT_SECRET is not. Authentication will fail.",
         file=sys.stderr,
@@ -216,6 +226,9 @@ FACTORY_SQLITE_PATH: str = os.environ.get("FACTORY_SQLITE_PATH", ".factory/facto
 FACTORY_SCOUT_INTERVAL_SECONDS: int = int(
     os.environ.get("FACTORY_SCOUT_INTERVAL_SECONDS", "60")
 )
+FACTORY_INSTANCE_STALE_SECONDS: int = int(
+    os.environ.get("FACTORY_INSTANCE_STALE_SECONDS", str(FACTORY_SCOUT_INTERVAL_SECONDS * 3))
+)
 FACTORY_LOCAL_SCOUT_MODEL: str = os.environ.get("FACTORY_LOCAL_SCOUT_MODEL", "local-scout")
 FACTORY_SCOUT_DRY_RUN: bool = os.environ.get("FACTORY_SCOUT_DRY_RUN", "true").strip().lower() in (
     "1",
@@ -241,6 +254,9 @@ FACTORY_ARCHON_EXECUTE: bool = os.environ.get("FACTORY_ARCHON_EXECUTE", "false")
 FACTORY_ARCHON_WORKFLOW_NAME: str = os.environ.get(
     "FACTORY_ARCHON_WORKFLOW_NAME", "pave-dark-factory-execute-task"
 )
+FACTORY_SELF_LEARNING_WORKFLOW_NAME: str = os.environ.get(
+    "FACTORY_SELF_LEARNING_WORKFLOW_NAME", "pave-dark-factory-self-learning"
+)
 FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL: bool = (
     os.environ.get("FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL", "true").strip().lower()
     in (
@@ -250,6 +266,19 @@ FACTORY_SCOUT_INCLUDE_CAPABILITY_POOL: bool = (
         "on",
     )
 )
+FACTORY_PAVE_BOARD_CHANNEL_FALLBACK: bool = (
+    os.environ.get("FACTORY_PAVE_BOARD_CHANNEL_FALLBACK", "true").strip().lower()
+    in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+)
+FACTORY_GLOW_BASE_URL: str = os.environ.get(
+    "FACTORY_GLOW_BASE_URL", "https://webservices.wisetechglobal.com/Glow"
+).rstrip("/")
+FACTORY_GLOW_TOKEN_PATH: str = os.environ.get("FACTORY_GLOW_TOKEN_PATH", "")
 
 # CORS — comma-separated list of allowed origins; defaults to localhost + 127.0.0.1
 # on the configured FRONTEND_PORT so the default dev setup works without any env vars.
